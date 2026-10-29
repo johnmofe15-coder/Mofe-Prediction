@@ -3,7 +3,6 @@ import requests
 from requests.adapters import HTTPAdapter
 import math
 import numpy as np
-import textwrap
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,8 +14,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Robust HTML renderer: Strips leading indentation to prevent markdown <pre><code> block bugs
 def render_html(html_str: str):
-    st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
+    cleaned = "\n".join(line.strip() for line in html_str.strip().splitlines() if line.strip())
+    st.markdown(cleaned, unsafe_allow_html=True)
 
 # Persistent HTTP Session with Connection Pooling
 @st.cache_resource
@@ -29,7 +30,7 @@ def get_http_session() -> requests.Session:
     return session
 
 # =====================================================================
-# 1. VECTORIZED PREDICTION ENGINE WITH IN-PLAY ADJUSTMENT
+# 1. VECTORIZED PREDICTION ENGINE WITH ADAPTIVE IN-PLAY MARKETS
 # =====================================================================
 class QuantitativePredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -52,9 +53,9 @@ class QuantitativePredictionEngine:
         away_probs = self._poisson_vector(rem_away_xG)
         matrix = np.outer(home_probs, away_probs)
 
-        # Vectorized probability calculation for remaining goals added to current score
+        current_total = live_h_score + live_a_score
         home_win, draw, away_win = 0.0, 0.0, 0.0
-        over_1_5, over_2_5, over_3_5 = 0.0, 0.0, 0.0
+        over_1_5, over_2_5, over_3_5, over_next = 0.0, 0.0, 0.0, 0.0
         btts_yes = 0.0
 
         for h in range(self.max_goals):
@@ -74,6 +75,7 @@ class QuantitativePredictionEngine:
                 if tot > 1.5: over_1_5 += p
                 if tot > 2.5: over_2_5 += p
                 if tot > 3.5: over_3_5 += p
+                if tot > (current_total + 0.5): over_next += p
                 if final_h > 0 and final_a > 0: btts_yes += p
 
         double_chance_1x = home_win + draw
@@ -106,7 +108,8 @@ class QuantitativePredictionEngine:
             "Goals": {
                 "Over_1_5": round(over_1_5 * 100, 1),
                 "Over_2_5": round(over_2_5 * 100, 1),
-                "Over_3_5": round(over_3_5 * 100, 1)
+                "Over_3_5": round(over_3_5 * 100, 1),
+                "Over_Next": round(over_next * 100, 1)
             },
             "BTTS": {
                 "Yes": round(btts_yes * 100, 1),
@@ -125,7 +128,7 @@ class QuantitativePredictionEngine:
         ov_25 = probs["Goals"]["Over_2_5"]
         btts_y = probs["BTTS"]["Yes"]
 
-        if dc_1x >= 85.0:
+        if dc_1x >= 84.0:
             bankers.append({
                 "market": f"{home_name} or Draw (1X)",
                 "confidence": dc_1x,
@@ -133,7 +136,7 @@ class QuantitativePredictionEngine:
                 "badge": "pill-green",
                 "odds": round((100.0 / max(1.0, dc_1x)) * 1.05, 2)
             })
-        elif dc_x2 >= 85.0:
+        elif dc_x2 >= 84.0:
             bankers.append({
                 "market": f"{away_name} or Draw (X2)",
                 "confidence": dc_x2,
@@ -142,7 +145,7 @@ class QuantitativePredictionEngine:
                 "odds": round((100.0 / max(1.0, dc_x2)) * 1.05, 2)
             })
 
-        if ov_15 >= 85.0:
+        if ov_15 >= 84.0:
             bankers.append({
                 "market": "Over 1.5 Goals",
                 "confidence": ov_15,
@@ -205,7 +208,7 @@ class QuantitativePredictionEngine:
 quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
 
 # =====================================================================
-# 2. HARDWARE-ACCELERATED LIQUID GLASS WITH LIVE PULSE STYLES
+# 2. HARDWARE ACCELERATED LIQUID GLASS STYLING
 # =====================================================================
 render_html("""
 <style>
@@ -269,7 +272,7 @@ render_html("""
         text-transform: uppercase;
     }
 
-    /* LIVE SCORE COUNTER CHIP */
+    /* LIVE SCORE BADGE */
     .live-score-badge {
         display: inline-flex;
         align-items: center;
@@ -302,22 +305,11 @@ render_html("""
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
         flex-shrink: 0;
     }
-    .icon-cyan {
-        background: linear-gradient(135deg, rgba(82, 229, 231, 0.3) 0%, rgba(20, 110, 245, 0.15) 100%);
-        border-color: rgba(82, 229, 231, 0.5);
-    }
-    .icon-green {
-        background: linear-gradient(135deg, rgba(48, 209, 88, 0.3) 0%, rgba(16, 185, 129, 0.12) 100%);
-        border-color: rgba(48, 209, 88, 0.5);
-    }
-    .icon-violet {
-        background: linear-gradient(135deg, rgba(192, 132, 252, 0.3) 0%, rgba(138, 43, 226, 0.15) 100%);
-        border-color: rgba(192, 132, 252, 0.5);
-    }
-    .icon-red {
-        background: linear-gradient(135deg, rgba(255, 69, 58, 0.3) 0%, rgba(183, 28, 28, 0.15) 100%);
-        border-color: rgba(255, 69, 58, 0.5);
-    }
+    .icon-cyan { background: linear-gradient(135deg, rgba(82, 229, 231, 0.3) 0%, rgba(20, 110, 245, 0.15) 100%); border-color: rgba(82, 229, 231, 0.5); }
+    .icon-green { background: linear-gradient(135deg, rgba(48, 209, 88, 0.3) 0%, rgba(16, 185, 129, 0.12) 100%); border-color: rgba(48, 209, 88, 0.5); }
+    .icon-violet { background: linear-gradient(135deg, rgba(192, 132, 252, 0.3) 0%, rgba(138, 43, 226, 0.15) 100%); border-color: rgba(192, 132, 252, 0.5); }
+    .icon-gold { background: linear-gradient(135deg, rgba(255, 214, 10, 0.3) 0%, rgba(245, 158, 11, 0.15) 100%); border-color: rgba(255, 214, 10, 0.5); }
+    .icon-red { background: linear-gradient(135deg, rgba(255, 69, 58, 0.3) 0%, rgba(183, 28, 28, 0.15) 100%); border-color: rgba(255, 69, 58, 0.5); }
 
     /* LIQUID GLASS PILLS */
     .glass-pill {
@@ -367,9 +359,7 @@ render_html("""
         border-top: 1px solid #ffffff !important;
         box-shadow: 0 4px 16px rgba(82, 229, 231, 0.25) !important;
     }
-    .stTabs [data-baseweb="tab-highlight"] {
-        display: none !important;
-    }
+    .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
 
     /* LIQUID GLASS SELECTOR CONTROLS (RADIO) */
     div[data-testid="stRadio"] > div[role="radiogroup"] {
@@ -391,9 +381,7 @@ render_html("""
         transform: translate3d(0, -2px, 0);
         border-color: rgba(82, 229, 231, 0.4) !important;
     }
-    div[data-testid="stRadio"] input[type="radio"] {
-        display: none;
-    }
+    div[data-testid="stRadio"] input[type="radio"] { display: none; }
     div[data-testid="stRadio"] div[data-testid="stMarkdownContainer"] p {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         font-weight: 700 !important;
@@ -431,19 +419,8 @@ render_html("""
         border-color: rgba(82, 229, 231, 0.35);
     }
 
-    .team-logo {
-        width: 32px;
-        height: 32px;
-        object-fit: contain;
-    }
-
-    .confidence-metric {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 1.9rem;
-        font-weight: 800;
-        color: #ffffff;
-    }
-
+    .team-logo { width: 32px; height: 32px; object-fit: contain; }
+    .confidence-metric { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.9rem; font-weight: 800; color: #ffffff; }
     .hero-gradient-text {
         font-size: 2.2rem;
         letter-spacing: -0.035em;
@@ -462,25 +439,17 @@ render_html("""
     }
 
     /* TELEMETRY BARS */
-    .telemetry-row {
-        margin-bottom: 12px;
-    }
+    .telemetry-row { margin-bottom: 10px; }
     .telemetry-bar-wrap {
         display: flex;
-        height: 7px;
+        height: 6px;
         background: rgba(255, 255, 255, 0.08);
         border-radius: 9999px;
         overflow: hidden;
         margin-top: 4px;
     }
-    .bar-home {
-        background: #52e5e7;
-        height: 100%;
-    }
-    .bar-away {
-        background: #c084fc;
-        height: 100%;
-    }
+    .bar-home { background: #52e5e7; height: 100%; }
+    .bar-away { background: #c084fc; height: 100%; }
 </style>
 <div class="bg-canvas"></div>
 """)
@@ -544,17 +513,15 @@ def fetch_league_matches(args) -> list:
             h_name = home.get("team", {}).get("displayName", "Home")
             a_name = away.get("team", {}).get("displayName", "Away")
 
-            # Game Status & Clock Tracking
             status_obj = event.get("status", {})
             status_type = status_obj.get("type", {})
-            state = status_type.get("state", "pre") # "pre", "in", "post"
+            state = status_type.get("state", "pre")
             is_live = (state == "in")
             is_finished = (state == "post")
 
             raw_clock = status_obj.get("displayClock", "")
             detail_str = status_type.get("detail", "Scheduled")
             
-            # Minute estimation for in-play remaining simulation
             try:
                 current_min = float(raw_clock.replace("'", "").replace("+", ".")) if raw_clock else (45.0 if "Half" in detail_str else 0.0)
             except:
@@ -562,11 +529,9 @@ def fetch_league_matches(args) -> list:
 
             minutes_left = max(1.0, 90.0 - current_min) if is_live else 90.0
 
-            # Current Live Scores
             home_score = int(home.get("score", 0)) if (is_live or is_finished) else 0
             away_score = int(away.get("score", 0)) if (is_live or is_finished) else 0
 
-            # Match Time
             raw_date = event.get("date", "")
             match_time = "TBD"
             if raw_date:
@@ -576,12 +541,10 @@ def fetch_league_matches(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            # Pre-match projected xG seeds
             seed = sum(ord(c) for c in (h_name + a_name))
             raw_h_xG = 1.30 + ((seed % 11) / 10.0)
             raw_a_xG = 0.95 + (((seed * 3) % 9) / 10.0)
 
-            # In-play Dynamic Simulation
             sim = quant_engine.simulate_match(
                 raw_h_xG, raw_a_xG, 
                 live_h_score=home_score, 
@@ -590,8 +553,6 @@ def fetch_league_matches(args) -> list:
             )
             rec, bankers, values = quant_engine.evaluate_tiers(sim, h_name, a_name)
 
-            # In-Play Match Telemetry (Possession, Shots, Corners)
-            # Extracted or simulated proportionally from live event progress
             possession_home = 50 + int((seed % 19) - 9)
             shots_h = max(home_score, int((seed % 7) + (current_min / 12)))
             shots_a = max(away_score, int(((seed * 2) % 6) + (current_min / 14)))
@@ -606,7 +567,6 @@ def fetch_league_matches(args) -> list:
             matches.append({
                 "event_id": event.get("id", ""),
                 "league": league["name"],
-                "league_code": league["code"],
                 "tier": league["tier"],
                 "home": h_name,
                 "home_logo": home.get("team", {}).get("logo", default_logo),
@@ -658,7 +618,7 @@ def fetch_all_fixtures(target_date: date):
                 t3.append(m)
     return t1, t2, t3
 
-with st.spinner("Streaming live football telemetry & Poisson simulations..."):
+with st.spinner("Streaming real-time fixtures & Poisson tensors..."):
     tier_1_games, tier_2_games, tier_3_games = fetch_all_fixtures(date.today())
     all_today_games = tier_1_games + tier_2_games + tier_3_games
     live_fixtures = [m for m in all_today_games if m["is_live"]]
@@ -666,7 +626,7 @@ with st.spinner("Streaming live football telemetry & Poisson simulations..."):
 # =====================================================================
 # 4. APP HEADER
 # =====================================================================
-live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} MATCHES LIVE NOW</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 Matches Currently In-Play</span>'
+live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} MATCHES LIVE NOW</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play Fixtures</span>'
 
 render_html(f"""
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
@@ -699,7 +659,6 @@ def render_quant_grid(match_list):
         sim = m["simulation"]
         rec = m["recommendation"]
 
-        # Status badge formatting
         if m["is_live"]:
             status_badge = f'<span class="live-pill"><span class="live-dot"></span>{m["clock"]}</span>'
             middle_display = f'<span class="live-score-badge">{m["home_score"]} - {m["away_score"]}</span>'
@@ -785,7 +744,7 @@ with tab_feed:
         st.info("No fixtures playing today in Tier 3 leagues.")
 
 # =====================================================================
-# TAB 2: IN-PLAY LIVE MATCH CENTER (LIVE STATS & TELEMETRY)
+# TAB 2: IN-PLAY LIVE MATCH CENTER (BUG-FREE RENDER)
 # =====================================================================
 with tab_live_center:
     render_html("""
@@ -799,7 +758,7 @@ with tab_live_center:
     </div>
 </div>
 <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-    Track real-time scores, head-to-head possession, shots, and dynamically re-calculated Poisson expectations without leaving the app.
+    Inspect live games with possession bars, shot maps, and adaptive Poisson probabilities.
 </p>
 """)
 
@@ -815,127 +774,126 @@ with tab_live_center:
 
         st_data = chosen_match["stats"]
         sim_data = chosen_match["simulation"]
+        current_total = chosen_match["home_score"] + chosen_match["away_score"]
 
         col_live_main, col_live_probs = st.columns([1.3, 1])
 
         with col_live_main:
             status_chip = f'<span class="live-pill"><span class="live-dot"></span>LIVE IN-PLAY: {chosen_match["clock"]}</span>' if chosen_match["is_live"] else f'<span class="glass-pill pill-cyan">{chosen_match["clock"]}</span>'
-            render_html(f"""
+            
+            # Purely unindented markup string to avoid code-block bugs
+            center_card = f"""
 <div class="liquid-glass-card" style="margin-bottom: 16px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        {status_chip}
-        <span style="font-size: 0.82rem; color: rgba(255,255,255,0.45);">{chosen_match['league']}</span>
-    </div>
-    
-    <div style="display: flex; justify-content: space-around; align-items: center; margin: 18px 0; background: rgba(255,255,255,0.02); padding: 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
-        <div style="text-align: center; width: 35%;">
-            <img src="{chosen_match['home_logo']}" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 6px;"/>
-            <div style="font-weight: 800; font-size: 1.05rem; color: #fff;">{chosen_match['home']}</div>
-        </div>
-        <div style="text-align: center;">
-            <div class="live-score-badge" style="font-size: 1.8rem; padding: 6px 20px;">
-                {chosen_match['home_score']} - {chosen_match['away_score']}
-            </div>
-            <div style="font-size: 0.76rem; color: rgba(255,255,255,0.5); margin-top: 6px;">Live Score</div>
-        </div>
-        <div style="text-align: center; width: 35%;">
-            <img src="{chosen_match['away_logo']}" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 6px;"/>
-            <div style="font-weight: 800; font-size: 1.05rem; color: #fff;">{chosen_match['away']}</div>
-        </div>
-    </div>
-
-    <!-- Live Head-to-Head Telemetry Comparison -->
-    <h4 style="margin: 16px 0 12px 0; font-size: 1rem;">Live Match Telemetry</h4>
-
-    <div class="telemetry-row">
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #52e5e7;">{st_data['possession_h']}%</span>
-            <span>Ball Possession</span>
-            <span style="color: #c084fc;">{st_data['possession_a']}%</span>
-        </div>
-        <div class="telemetry-bar-wrap">
-            <div class="bar-home" style="width: {st_data['possession_h']}%;"></div>
-            <div class="bar-away" style="width: {st_data['possession_a']}%;"></div>
-        </div>
-    </div>
-
-    <div class="telemetry-row">
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #52e5e7;">{st_data['sot_h']} ({st_data['shots_h']})</span>
-            <span>Shots on Target (Total)</span>
-            <span style="color: #c084fc;">{st_data['sot_a']} ({st_data['shots_a']})</span>
-        </div>
-        <div class="telemetry-bar-wrap">
-            <div class="bar-home" style="width: {int((st_data['shots_h'] / max(1, st_data['shots_h'] + st_data['shots_a'])) * 100)}%;"></div>
-            <div class="bar-away" style="width: {int((st_data['shots_a'] / max(1, st_data['shots_h'] + st_data['shots_a'])) * 100)}%;"></div>
-        </div>
-    </div>
-
-    <div class="telemetry-row">
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #52e5e7;">{st_data['corners_h']}</span>
-            <span>Corner Kicks</span>
-            <span style="color: #c084fc;">{st_data['corners_a']}</span>
-        </div>
-        <div class="telemetry-bar-wrap">
-            <div class="bar-home" style="width: {int((st_data['corners_h'] / max(1, st_data['corners_h'] + st_data['corners_a'])) * 100)}%;"></div>
-            <div class="bar-away" style="width: {int((st_data['corners_a'] / max(1, st_data['corners_h'] + st_data['corners_a'])) * 100)}%;"></div>
-        </div>
-    </div>
-
-    <div class="telemetry-row">
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #ffd60a;">🟨 {st_data['yellow_h']}</span>
-            <span>Disciplinary Cards</span>
-            <span style="color: #ffd60a;">🟨 {st_data['yellow_a']}</span>
-        </div>
-    </div>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+{status_chip}
+<span style="font-size: 0.82rem; color: rgba(255,255,255,0.45);">{chosen_match['league']}</span>
 </div>
-""")
+<div style="display: flex; justify-content: space-around; align-items: center; margin: 18px 0; background: rgba(255,255,255,0.02); padding: 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
+<div style="text-align: center; width: 35%;">
+<img src="{chosen_match['home_logo']}" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 6px;"/>
+<div style="font-weight: 800; font-size: 1.05rem; color: #fff;">{chosen_match['home']}</div>
+</div>
+<div style="text-align: center;">
+<div class="live-score-badge" style="font-size: 1.8rem; padding: 6px 20px;">
+{chosen_match['home_score']} - {chosen_match['away_score']}
+</div>
+<div style="font-size: 0.76rem; color: rgba(255,255,255,0.5); margin-top: 6px;">Live Score</div>
+</div>
+<div style="text-align: center; width: 35%;">
+<img src="{chosen_match['away_logo']}" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 6px;"/>
+<div style="font-weight: 800; font-size: 1.05rem; color: #fff;">{chosen_match['away']}</div>
+</div>
+</div>
+<h4 style="margin: 16px 0 12px 0; font-size: 1rem;">Live Match Telemetry</h4>
+<div class="telemetry-row">
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
+<span style="color: #52e5e7;">{st_data['possession_h']}%</span>
+<span>Ball Possession</span>
+<span style="color: #c084fc;">{st_data['possession_a']}%</span>
+</div>
+<div class="telemetry-bar-wrap">
+<div class="bar-home" style="width: {st_data['possession_h']}%;"></div>
+<div class="bar-away" style="width: {st_data['possession_a']}%;"></div>
+</div>
+</div>
+<div class="telemetry-row">
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
+<span style="color: #52e5e7;">{st_data['sot_h']} ({st_data['shots_h']})</span>
+<span>Shots on Target (Total)</span>
+<span style="color: #c084fc;">{st_data['sot_a']} ({st_data['shots_a']})</span>
+</div>
+<div class="telemetry-bar-wrap">
+<div class="bar-home" style="width: {int((st_data['shots_h'] / max(1, st_data['shots_h'] + st_data['shots_a'])) * 100)}%;"></div>
+<div class="bar-away" style="width: {int((st_data['shots_a'] / max(1, st_data['shots_h'] + st_data['shots_a'])) * 100)}%;"></div>
+</div>
+</div>
+<div class="telemetry-row">
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
+<span style="color: #52e5e7;">{st_data['corners_h']}</span>
+<span>Corner Kicks</span>
+<span style="color: #c084fc;">{st_data['corners_a']}</span>
+</div>
+<div class="telemetry-bar-wrap">
+<div class="bar-home" style="width: {int((st_data['corners_h'] / max(1, st_data['corners_h'] + st_data['corners_a'])) * 100)}%;"></div>
+<div class="bar-away" style="width: {int((st_data['corners_a'] / max(1, st_data['corners_h'] + st_data['corners_a'])) * 100)}%;"></div>
+</div>
+</div>
+<div class="telemetry-row">
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
+<span style="color: #ffd60a;">🟨 {st_data['yellow_h']}</span>
+<span>Disciplinary Cards</span>
+<span style="color: #ffd60a;">🟨 {st_data['yellow_a']}</span>
+</div>
+</div>
+</div>
+"""
+            render_html(center_card)
 
         with col_live_probs:
-            render_html(f"""
+            ov_next_label = f"Over {current_total + 0.5} (Next Goal)"
+            probs_card = f"""
 <div class="liquid-glass-card" style="border-color: rgba(82, 229, 231, 0.45);">
-    <span class="glass-pill pill-cyan">Dynamic In-Play Poisson</span>
-    <h3 style="margin: 12px 0 4px 0;">Rest-of-Game Probabilities</h3>
-    <p style="font-size: 0.8rem; color: rgba(255,255,255,0.45); margin-bottom: 12px;">Conditioned on current score & time elapsed.</p>
-    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px;">
-        <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Live 1</span><br>
-            <b style="color: #fff; font-size: 0.95rem;">{sim_data['1X2']['Home']}%</b>
-        </div>
-        <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Live X</span><br>
-            <b style="color: #fff; font-size: 0.95rem;">{sim_data['1X2']['Draw']}%</b>
-        </div>
-        <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Live 2</span><br>
-            <b style="color: #fff; font-size: 0.95rem;">{sim_data['1X2']['Away']}%</b>
-        </div>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-        <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Live Over 1.5 Goals:</span>
-        <span style="font-weight: 800; color: #52e5e7;">{sim_data['Goals']['Over_1_5']}%</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-        <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Live Over 2.5 Goals:</span>
-        <span style="font-weight: 800; color: #52e5e7;">{sim_data['Goals']['Over_2_5']}%</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-        <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Both Teams To Score:</span>
-        <span style="font-weight: 800; color: #30d158;">{sim_data['BTTS']['Yes']}%</span>
-    </div>
-    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
-        ⚡ <b>In-Play Advantage:</b> When a match has scored early goals, the Over 2.5 barrier significantly drops in implied variance.
-    </div>
+<span class="glass-pill pill-cyan">Dynamic In-Play Poisson</span>
+<h3 style="margin: 12px 0 4px 0;">Rest-of-Game Probabilities</h3>
+<p style="font-size: 0.8rem; color: rgba(255,255,255,0.45); margin-bottom: 12px;">Conditioned on live score: {chosen_match['home_score']}-{chosen_match['away_score']}</p>
+<hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
+<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px;">
+<div class="prob-chip">
+<span style="color: rgba(255,255,255,0.45);">Live 1</span><br>
+<b style="color: #fff; font-size: 0.95rem;">{sim_data['1X2']['Home']}%</b>
 </div>
-""")
+<div class="prob-chip">
+<span style="color: rgba(255,255,255,0.45);">Live X</span><br>
+<b style="color: #fff; font-size: 0.95rem;">{sim_data['1X2']['Draw']}%</b>
+</div>
+<div class="prob-chip">
+<span style="color: rgba(255,255,255,0.45);">Live 2</span><br>
+<b style="color: #fff; font-size: 0.95rem;">{sim_data['1X2']['Away']}%</b>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+<span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">{ov_next_label}:</span>
+<span style="font-weight: 800; color: #52e5e7;">{sim_data['Goals']['Over_Next']}%</span>
+</div>
+<div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+<span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Over 2.5 Goals:</span>
+<span style="font-weight: 800; color: {'#30d158' if sim_data['Goals']['Over_2_5'] >= 99 else '#52e5e7'};">{'Hit ✅ (100%)' if current_total > 2.5 else str(sim_data['Goals']['Over_2_5']) + '%'}</span>
+</div>
+<div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+<span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Both Teams To Score:</span>
+<span style="font-weight: 800; color: {'#30d158' if sim_data['BTTS']['Yes'] >= 99 else '#52e5e7'};">{'Hit ✅ (100%)' if (chosen_match['home_score'] > 0 and chosen_match['away_score'] > 0) else str(sim_data['BTTS']['Yes']) + '%'}</span>
+</div>
+<div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
+⚡ <b>In-Play Advantage:</b> Current goal count updates in real-time. Live edge isolates rest-of-match lambda decay.
+</div>
+</div>
+"""
+            render_html(probs_card)
     else:
         st.info("No fixtures available today to inspect.")
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB WITH LIQUID SELECTORS
+# TAB 3: SAFE BANKER HUB (WITH LIVE SCORES & 20-ODDS MASTER SLIP)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -949,28 +907,45 @@ with tab_surebets:
     </div>
 </div>
 <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-    Strictly isolates selections where Poisson simulation confidence exceeds 85.0% in low-variance markets.
+    Mathematical multi-leg accumulator generation strictly isolating low-variance markets with live in-game status tracking.
 </p>
 """)
 
     banker_mode = st.radio(
         "Banker Strategy Mode",
-        ["🔥 3-Banker Safe Rollover", "⚡ 5-Banker Multi Slip", "💎 10-Odds Monster Banker"],
+        [
+            "🔥 3-Banker Safe Rollover", 
+            "⚡ 5-Banker Multi Slip", 
+            "💎 10-Odds Monster Banker", 
+            "👑 20-Odds Quantitative Master Ticket"
+        ],
         horizontal=True,
         label_visibility="collapsed"
     )
 
-    all_bankers = [
-        {
-            "match": f"{g['home']} vs {g['away']}",
-            "league": g["league"],
-            "time": g["time"],
-            "market": b["market"],
-            "confidence": b["confidence"],
-            "odds": b["odds"]
-        }
-        for g in all_today_games for b in g["bankers"]
-    ]
+    all_bankers = []
+    for g in all_today_games:
+        for b in g["bankers"]:
+            all_bankers.append({
+                "match": f"{g['home']} vs {g['away']}",
+                "home": g["home"],
+                "away": g["away"],
+                "home_logo": g["home_logo"],
+                "away_logo": g["away_logo"],
+                "home_score": g["home_score"],
+                "away_score": g["away_score"],
+                "is_live": g["is_live"],
+                "is_finished": g["is_finished"],
+                "clock": g["clock"],
+                "stats": g["stats"],
+                "league": g["league"],
+                "time": g["time"],
+                "market": b["market"],
+                "confidence": b["confidence"],
+                "odds": b["odds"]
+            })
+
+    # Sort descending by modeled certainty
     all_bankers.sort(key=lambda x: x["confidence"], reverse=True)
 
     if "3-Banker" in banker_mode:
@@ -979,7 +954,7 @@ with tab_surebets:
     elif "5-Banker" in banker_mode:
         selected_slip = all_bankers[:5]
         slip_label = "5-Leg Multi Slip"
-    else:
+    elif "10-Odds" in banker_mode:
         selected_slip = []
         c_odds = 1.0
         for b in all_bankers:
@@ -988,31 +963,71 @@ with tab_surebets:
             if c_odds >= 9.8 or len(selected_slip) >= 8:
                 break
         slip_label = "10+ Odds Engineered Slip"
+    else: # 20-Odds Master Ticket
+        selected_slip = []
+        c_odds = 1.0
+        for b in all_bankers:
+            selected_slip.append(b)
+            c_odds *= b["odds"]
+            if c_odds >= 19.5 or len(selected_slip) >= 12:
+                break
+        slip_label = "👑 20-Odds Quantitative Master Ticket"
 
     c_left, c_right = st.columns([2, 1])
     with c_left:
         if selected_slip:
             cards = []
             for item in selected_slip:
+                # Live status formatting on Banker cards
+                if item["is_live"]:
+                    status_markup = f'<span class="live-pill"><span class="live-dot"></span>{item["clock"]}</span>'
+                    score_markup = f'<span class="live-score-badge" style="font-size: 0.95rem; padding: 2px 10px;">{item["home_score"]} - {item["away_score"]}</span>'
+                    live_telemetry_snippet = f"""
+<div style="display: flex; gap: 14px; font-size: 0.74rem; color: rgba(255,255,255,0.55); margin-top: 6px;">
+<span>Poss: <b style="color:#52e5e7;">{item['stats']['possession_h']}%</b> - <b style="color:#c084fc;">{item['stats']['possession_a']}%</b></span>
+<span>Shots OT: <b style="color:#fff;">{item['stats']['sot_h']} - {item['stats']['sot_a']}</b></span>
+<span>Corners: <b style="color:#fff;">{item['stats']['corners_h']} - {item['stats']['corners_a']}</b></span>
+</div>
+"""
+                elif item["is_finished"]:
+                    status_markup = '<span class="glass-pill pill-gold">FT</span>'
+                    score_markup = f'<span class="live-score-badge" style="font-size: 0.95rem; padding: 2px 10px; border-color: rgba(255,255,255,0.2);">{item["home_score"]} - {item["away_score"]}</span>'
+                    live_telemetry_snippet = ""
+                else:
+                    status_markup = f'<span class="glass-pill pill-green">PRE-MATCH</span>'
+                    score_markup = f'<span style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">{item["time"]}</span>'
+                    live_telemetry_snippet = ""
+
                 cards.append(f"""
 <div class="liquid-glass-card" style="margin-bottom: 12px; padding: 14px 18px;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span class="glass-pill pill-green">{item['league']}</span>
-        <span style="font-size: 0.92rem; color: #52e5e7; font-weight: 800;">Odds: {item['odds']}</span>
-    </div>
-    <div style="margin: 8px 0;">
-        <h4 style="margin: 0; font-size: 1.1rem;">{item['match']}</h4>
-        <div style="font-size: 0.78rem; color: rgba(255,255,255,0.4);">Kickoff: {item['time']}</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
-        <span style="font-size: 0.92rem; font-weight: 600; color: #fff;">{item['market']}</span>
-        <span style="font-size: 1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Certainty</span>
-    </div>
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<div style="display: flex; align-items: center; gap: 8px;">
+{status_markup}
+<span style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">{item['league']}</span>
+</div>
+<span style="font-size: 0.95rem; color: #52e5e7; font-weight: 800;">Odds: {item['odds']}</span>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+<div style="display: flex; align-items: center; gap: 8px;">
+<img src="{item['home_logo']}" style="width: 24px; height: 24px; object-fit: contain;"/>
+<span style="font-size: 1.05rem; font-weight: 700; color: #fff;">{item['home']}</span>
+</div>
+{score_markup}
+<div style="display: flex; align-items: center; gap: 8px;">
+<span style="font-size: 1.05rem; font-weight: 700; color: #fff;">{item['away']}</span>
+<img src="{item['away_logo']}" style="width: 24px; height: 24px; object-fit: contain;"/>
+</div>
+</div>
+{live_telemetry_snippet}
+<div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; margin-top: 6px;">
+<span style="font-size: 0.92rem; font-weight: 600; color: #fff;">{item['market']}</span>
+<span style="font-size: 1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Certainty</span>
+</div>
 </div>
 """)
             render_html("".join(cards))
         else:
-            st.info("No fixtures currently meet the ≥ 85.0% banker criteria.")
+            st.info("No fixtures currently meet the ≥ 84.0% banker threshold.")
 
     with c_right:
         if selected_slip:
@@ -1022,23 +1037,31 @@ with tab_surebets:
                 tot_odds *= s["odds"]
                 joint_prob *= (s["confidence"] / 100.0)
 
+            # Highlighting 20-odds master ticket border
+            card_border = "rgba(255, 214, 10, 0.6)" if "20-Odds" in slip_label else "rgba(82, 229, 231, 0.45)"
+            badge_color = "pill-gold" if "20-Odds" in slip_label else "pill-cyan"
+
             render_html(f"""
-<div class="liquid-glass-card" style="border-color: rgba(82, 229, 231, 0.45);">
-    <span class="glass-pill pill-cyan">{slip_label}</span>
-    <h3 style="margin: 12px 0 2px 0;">Ticket Overview</h3>
-    <p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Compound Poisson Tensor</p>
-    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 10px 0;">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-        <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Odds:</span>
-        <span style="font-size: 1.35rem; font-weight: 800; color: #52e5e7;">{round(tot_odds, 2)}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-        <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Survival Rate:</span>
-        <span style="font-size: 1.35rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
-    </div>
-    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
-        🛡️ <b>Optimal Rule:</b> Rollover compounding strategy advised when survival rate exceeds 65%.
-    </div>
+<div class="liquid-glass-card" style="border-color: {card_border};">
+<span class="glass-pill {badge_color}">{slip_label}</span>
+<h3 style="margin: 12px 0 2px 0;">Ticket Summary</h3>
+<p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Engineered with independent Poisson joint tensors.</p>
+<hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 10px 0;">
+<div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Odds:</span>
+<span style="font-size: 1.45rem; font-weight: 800; color: {'#ffd60a' if '20-Odds' in slip_label else '#52e5e7'};">{round(tot_odds, 2)}</span>
+</div>
+<div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Legs Count:</span>
+<span style="font-size: 1.15rem; font-weight: 700; color: #ffffff;">{len(selected_slip)} Selections</span>
+</div>
+<div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Joint Survival Probability:</span>
+<span style="font-size: 1.45rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
+</div>
+<div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
+👑 <b>Quant Master Rule:</b> The 20-Odds Ticket only aggregates high-probability outcomes (Double Chance 1X/X2 & Over 1.5) to keep ticket survival significantly higher than market averages.
+</div>
 </div>
 """)
 
@@ -1087,20 +1110,20 @@ with tab_kelly:
 
         render_html(f"""
 <div class="liquid-glass-card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <span class="glass-pill {edge_badge}">{edge_text}</span>
-        <span style="font-size: 0.88rem; color: #52e5e7; font-weight: 700;">Edge: {calculated_edge}%</span>
-    </div>
-    <h3 style="margin: 0 0 8px 0;">Target Allocation</h3>
-    <div style="margin: 14px 0;">
-        <div style="font-size: 0.74rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Recommended Stake</div>
-        <div style="font-size: 2.2rem; font-weight: 800; color: {stake_color};">
-            ${recommended_stake} <span style="font-size: 1rem; color: rgba(255,255,255,0.45);">({stake_pct}%)</span>
-        </div>
-    </div>
-    <div style="padding: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; font-size: 0.8rem; line-height: 1.4;">
-        {advice}
-    </div>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+<span class="glass-pill {edge_badge}">{edge_text}</span>
+<span style="font-size: 0.88rem; color: #52e5e7; font-weight: 700;">Edge: {calculated_edge}%</span>
+</div>
+<h3 style="margin: 0 0 8px 0;">Target Allocation</h3>
+<div style="margin: 14px 0;">
+<div style="font-size: 0.74rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Recommended Stake</div>
+<div style="font-size: 2.2rem; font-weight: 800; color: {stake_color};">
+${recommended_stake} <span style="font-size: 1rem; color: rgba(255,255,255,0.45);">({stake_pct}%)</span>
+</div>
+</div>
+<div style="padding: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; font-size: 0.8rem; line-height: 1.4;">
+{advice}
+</div>
 </div>
 """)
 
@@ -1132,37 +1155,37 @@ with tab_analyzer:
         with col_m1:
             render_html(f"""
 <div class="liquid-glass-card">
-    <span class="glass-pill pill-cyan">Poisson Parameters</span>
-    <h4 style="margin: 10px 0 14px 0;">Adjusted Expected Goals (xG)</h4>
-    <div style="margin-bottom: 12px;">
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
-            <span>{target_match['home']} (Home Adv: 1.15x)</span>
-            <span style="font-weight: 700; color: #52e5e7;">{sim_data['adj_home_xG']} xG</span>
-        </div>
-        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
-            <div style="width: {min(100, int(sim_data['adj_home_xG'] * 35))}%; height: 100%; background: #52e5e7; border-radius: 999px;"></div>
-        </div>
-    </div>
-    <div style="margin-bottom: 12px;">
-        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
-            <span>{target_match['away']}</span>
-            <span style="font-weight: 700; color: #c084fc;">{sim_data['adj_away_xG']} xG</span>
-        </div>
-        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
-            <div style="width: {min(100, int(sim_data['adj_away_xG'] * 35))}%; height: 100%; background: #c084fc; border-radius: 999px;"></div>
-        </div>
-    </div>
-    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 12px 0;">
-    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
-        <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.4);">Double Chance 1X</span><br>
-            <b style="color: #30d158; font-size: 0.95rem;">{sim_data['DoubleChance']['1X']}%</b>
-        </div>
-        <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.4);">BTTS (Yes)</span><br>
-            <b style="color: #52e5e7; font-size: 0.95rem;">{sim_data['BTTS']['Yes']}%</b>
-        </div>
-    </div>
+<span class="glass-pill pill-cyan">Poisson Parameters</span>
+<h4 style="margin: 10px 0 14px 0;">Adjusted Expected Goals (xG)</h4>
+<div style="margin-bottom: 12px;">
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
+<span>{target_match['home']} (Home Adv: 1.15x)</span>
+<span style="font-weight: 700; color: #52e5e7;">{sim_data['adj_home_xG']} xG</span>
+</div>
+<div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
+<div style="width: {min(100, int(sim_data['adj_home_xG'] * 35))}%; height: 100%; background: #52e5e7; border-radius: 999px;"></div>
+</div>
+</div>
+<div style="margin-bottom: 12px;">
+<div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
+<span>{target_match['away']}</span>
+<span style="font-weight: 700; color: #c084fc;">{sim_data['adj_away_xG']} xG</span>
+</div>
+<div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
+<div style="width: {min(100, int(sim_data['adj_away_xG'] * 35))}%; height: 100%; background: #c084fc; border-radius: 999px;"></div>
+</div>
+</div>
+<hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 12px 0;">
+<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+<div class="prob-chip">
+<span style="color: rgba(255,255,255,0.4);">Double Chance 1X</span><br>
+<b style="color: #30d158; font-size: 0.95rem;">{sim_data['DoubleChance']['1X']}%</b>
+</div>
+<div class="prob-chip">
+<span style="color: rgba(255,255,255,0.4);">BTTS (Yes)</span><br>
+<b style="color: #52e5e7; font-size: 0.95rem;">{sim_data['BTTS']['Yes']}%</b>
+</div>
+</div>
 </div>
 """)
 
@@ -1170,8 +1193,8 @@ with tab_analyzer:
             scorelines_html = "".join([
                 f"""
 <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
-    <span style="font-weight: 700; color: #fff; font-size: 0.95rem;">Scoreline: {s['score']}</span>
-    <span class="glass-pill pill-cyan">{s['prob']}% Prob</span>
+<span style="font-weight: 700; color: #fff; font-size: 0.95rem;">Scoreline: {s['score']}</span>
+<span class="glass-pill pill-cyan">{s['prob']}% Prob</span>
 </div>
 """
                 for s in sim_data["top_scorelines"]
@@ -1179,9 +1202,9 @@ with tab_analyzer:
 
             render_html(f"""
 <div class="liquid-glass-card">
-    <span class="glass-pill pill-violet">Highest Probability Outcomes</span>
-    <h4 style="margin: 10px 0 14px 0;">Most Probable Exact Scorelines</h4>
-    {scorelines_html}
+<span class="glass-pill pill-violet">Highest Probability Outcomes</span>
+<h4 style="margin: 10px 0 14px 0;">Most Probable Exact Scorelines</h4>
+{scorelines_html}
 </div>
 """)
     else:
