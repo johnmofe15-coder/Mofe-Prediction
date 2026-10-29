@@ -18,7 +18,7 @@ st.set_page_config(
 def render_html(html_str: str):
     st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
 
-# Persistent HTTP Session
+# Persistent HTTP Session with Connection Pooling
 @st.cache_resource
 def get_http_session() -> requests.Session:
     session = requests.Session()
@@ -189,11 +189,28 @@ class QuantitativePredictionEngine:
 quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
 
 # =====================================================================
-# 2. APPLE-INSPIRED 3D LIQUID GLASS CSS SYSTEM
+# 2. ZERO-LAG HARDWARE ACCELERATED LIQUID GLASS STYLES
 # =====================================================================
 render_html("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+
+    /* Hardware composited background canvas (fixes lag caused by background-attachment: fixed) */
+    .bg-canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: -1;
+        pointer-events: none;
+        background-color: #060810;
+        background-image: 
+            radial-gradient(circle at 15% 10%, rgba(20, 110, 245, 0.22) 0%, transparent 45%),
+            radial-gradient(circle at 85% 18%, rgba(82, 229, 231, 0.16) 0%, transparent 40%),
+            radial-gradient(circle at 50% 90%, rgba(168, 85, 247, 0.15) 0%, transparent 50%);
+        transform: translate3d(0, 0, 0);
+    }
 
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
@@ -207,19 +224,7 @@ render_html("""
         color: #ffffff !important;
     }
 
-    .stApp {
-        background-color: #060810;
-        background-image: 
-            radial-gradient(circle at 15% 10%, rgba(20, 110, 245, 0.28) 0%, transparent 45%),
-            radial-gradient(circle at 85% 18%, rgba(82, 229, 231, 0.22) 0%, transparent 40%),
-            radial-gradient(circle at 50% 90%, rgba(168, 85, 247, 0.2) 0%, transparent 50%);
-        background-attachment: fixed;
-        min-height: 100vh;
-    }
-
-    /* ========================================================= */
-    /* 1. 3D LIQUID GLASS ICONS (SQUIRCLES)                     */
-    /* ========================================================= */
+    /* 3D LIQUID GLASS SQUIRCLES (Lightweight rasterization) */
     .liquid-icon {
         display: inline-flex;
         align-items: center;
@@ -227,233 +232,171 @@ render_html("""
         width: 44px;
         height: 44px;
         border-radius: 14px;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.05) 100%);
-        box-shadow: 
-            0 8px 24px rgba(0, 0, 0, 0.4),
-            inset 0 1.5px 1.5px rgba(255, 255, 255, 0.75),
-            inset 0 -1.5px 2px rgba(0, 0, 0, 0.35);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 100%);
         border: 1px solid rgba(255, 255, 255, 0.25);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        font-size: 1.4rem;
-        position: relative;
-        overflow: hidden;
+        border-top: 1.5px solid rgba(255, 255, 255, 0.65);
+        font-size: 1.35rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
         flex-shrink: 0;
     }
-    .liquid-icon::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 50%;
-        background: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.0) 100%);
-        border-radius: 14px 14px 0 0;
-        pointer-events: none;
-    }
-
-    /* Icon Variations */
     .icon-cyan {
-        box-shadow: 0 0 20px rgba(82, 229, 231, 0.45), inset 0 1.5px 2px #ffffff;
-        background: linear-gradient(135deg, rgba(82, 229, 231, 0.35) 0%, rgba(19, 12, 183, 0.2) 100%);
+        background: linear-gradient(135deg, rgba(82, 229, 231, 0.3) 0%, rgba(20, 110, 245, 0.15) 100%);
+        border-color: rgba(82, 229, 231, 0.5);
     }
     .icon-green {
-        box-shadow: 0 0 20px rgba(48, 209, 88, 0.4), inset 0 1.5px 2px #ffffff;
-        background: linear-gradient(135deg, rgba(48, 209, 88, 0.35) 0%, rgba(16, 185, 129, 0.15) 100%);
+        background: linear-gradient(135deg, rgba(48, 209, 88, 0.3) 0%, rgba(16, 185, 129, 0.12) 100%);
+        border-color: rgba(48, 209, 88, 0.5);
     }
     .icon-violet {
-        box-shadow: 0 0 20px rgba(192, 132, 252, 0.45), inset 0 1.5px 2px #ffffff;
-        background: linear-gradient(135deg, rgba(192, 132, 252, 0.35) 0%, rgba(138, 43, 226, 0.2) 100%);
+        background: linear-gradient(135deg, rgba(192, 132, 252, 0.3) 0%, rgba(138, 43, 226, 0.15) 100%);
+        border-color: rgba(192, 132, 252, 0.5);
     }
 
-    /* ========================================================= */
-    /* 2. LIQUID GLASS PILLS & BADGES                           */
-    /* ========================================================= */
+    /* LIQUID GLASS PILLS */
     .glass-pill {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 5px 14px;
+        padding: 4px 12px;
         border-radius: 9999px;
-        font-size: 0.74rem;
+        font-size: 0.72rem;
         font-weight: 700;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        box-shadow: 
-            0 4px 16px rgba(0, 0, 0, 0.25),
-            inset 0 1px 1px rgba(255, 255, 255, 0.65),
-            inset 0 -1px 2px rgba(0, 0, 0, 0.3);
+        border-top: 1px solid rgba(255, 255, 255, 0.4);
     }
     .pill-cyan { 
-        color: #ffffff; 
-        background: linear-gradient(135deg, rgba(82, 229, 231, 0.35) 0%, rgba(82, 229, 231, 0.1) 100%); 
-        border: 1px solid rgba(82, 229, 231, 0.5); 
-        box-shadow: 0 0 14px rgba(82, 229, 231, 0.3), inset 0 1px 1.5px #fff; 
+        color: #52e5e7; 
+        background: rgba(82, 229, 231, 0.12); 
+        border: 1px solid rgba(82, 229, 231, 0.4); 
     }
     .pill-green { 
-        color: #ffffff; 
-        background: linear-gradient(135deg, rgba(48, 209, 88, 0.35) 0%, rgba(48, 209, 88, 0.1) 100%); 
-        border: 1px solid rgba(48, 209, 88, 0.5); 
-        box-shadow: 0 0 14px rgba(48, 209, 88, 0.3), inset 0 1px 1.5px #fff; 
+        color: #30d158; 
+        background: rgba(48, 209, 88, 0.12); 
+        border: 1px solid rgba(48, 209, 88, 0.4); 
     }
     .pill-violet { 
-        color: #ffffff; 
-        background: linear-gradient(135deg, rgba(192, 132, 252, 0.35) 0%, rgba(192, 132, 252, 0.1) 100%); 
-        border: 1px solid rgba(192, 132, 252, 0.5); 
-        box-shadow: 0 0 14px rgba(192, 132, 252, 0.3), inset 0 1px 1.5px #fff; 
+        color: #c084fc; 
+        background: rgba(192, 132, 252, 0.12); 
+        border: 1px solid rgba(192, 132, 252, 0.4); 
     }
     .pill-gold { 
-        color: #ffffff; 
-        background: linear-gradient(135deg, rgba(255, 214, 10, 0.35) 0%, rgba(255, 214, 10, 0.1) 100%); 
-        border: 1px solid rgba(255, 214, 10, 0.5); 
-        box-shadow: 0 0 14px rgba(255, 214, 10, 0.3), inset 0 1px 1.5px #fff; 
-    }
-    .pill-red { 
-        color: #ffffff; 
-        background: linear-gradient(135deg, rgba(255, 69, 58, 0.35) 0%, rgba(255, 69, 58, 0.1) 100%); 
-        border: 1px solid rgba(255, 69, 58, 0.5); 
-        box-shadow: 0 0 14px rgba(255, 69, 58, 0.3), inset 0 1px 1.5px #fff; 
+        color: #ffd60a; 
+        background: rgba(255, 214, 10, 0.12); 
+        border: 1px solid rgba(255, 214, 10, 0.4); 
     }
 
-    /* ========================================================= */
-    /* 3. 3D LIQUID GLASS NAVIGATION TABS                       */
-    /* ========================================================= */
+    /* 3D LIQUID GLASS NAVIGATION TABS */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        background: rgba(255, 255, 255, 0.035);
-        padding: 8px 10px;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 6px;
         border-radius: 9999px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 8px 24px rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(18px);
-        margin-bottom: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 20px;
     }
     .stTabs [data-baseweb="tab"] {
         border-radius: 9999px !important;
         color: rgba(255, 255, 255, 0.65) !important;
-        padding: 10px 22px !important;
+        padding: 8px 20px !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         font-weight: 700 !important;
-        font-size: 0.9rem !important;
+        font-size: 0.88rem !important;
         border: 1px solid transparent !important;
         background: transparent !important;
-        transition: all 0.25s ease !important;
+        transition: transform 0.15s ease, color 0.15s ease !important;
     }
     .stTabs [data-baseweb="tab"]:hover {
         color: #ffffff !important;
-        background: rgba(255, 255, 255, 0.06) !important;
+        background: rgba(255, 255, 255, 0.05) !important;
     }
-    /* Active Liquid Glass Tab Pod */
     .stTabs [aria-selected="true"] {
         color: #ffffff !important;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.25) 0%, rgba(82, 229, 231, 0.18) 100%) !important;
-        border: 1px solid rgba(82, 229, 231, 0.55) !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.8) !important;
-        box-shadow: 
-            0 8px 25px rgba(82, 229, 231, 0.35),
-            inset 0 1.5px 2px rgba(255, 255, 255, 0.9),
-            inset 0 -1.5px 2px rgba(0, 0, 0, 0.3) !important;
-        transform: translateY(-1px);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(82, 229, 231, 0.14) 100%) !important;
+        border: 1px solid rgba(82, 229, 231, 0.5) !important;
+        border-top: 1px solid #ffffff !important;
+        box-shadow: 0 4px 16px rgba(82, 229, 231, 0.25) !important;
     }
     .stTabs [data-baseweb="tab-highlight"] {
-        display: none !important; /* Eliminate standard flat underline */
+        display: none !important;
     }
 
-    /* ========================================================= */
-    /* 4. LIQUID GLASS RADIO BUTTON CONTROLS                    */
-    /* ========================================================= */
+    /* LIQUID GLASS SELECTOR CONTROLS (RADIO) */
     div[data-testid="stRadio"] > div[role="radiogroup"] {
         display: flex;
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
-        padding: 4px 0 16px 0;
+        padding: 2px 0 14px 0;
     }
     div[data-testid="stRadio"] label {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
         border-top: 1px solid rgba(255, 255, 255, 0.3) !important;
         border-radius: 9999px !important;
-        padding: 9px 20px !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.4) !important;
-        backdrop-filter: blur(12px) !important;
+        padding: 8px 18px !important;
         cursor: pointer !important;
-        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        transition: transform 0.15s ease, border-color 0.15s ease !important;
     }
     div[data-testid="stRadio"] label:hover {
-        transform: translateY(-2px);
+        transform: translate3d(0, -2px, 0);
         border-color: rgba(82, 229, 231, 0.4) !important;
-        box-shadow: 0 8px 24px rgba(82, 229, 231, 0.25), inset 0 1.5px 1.5px #fff !important;
     }
-    /* Hide the standard radio circle */
     div[data-testid="stRadio"] input[type="radio"] {
         display: none;
     }
     div[data-testid="stRadio"] div[data-testid="stMarkdownContainer"] p {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         font-weight: 700 !important;
-        font-size: 0.9rem !important;
+        font-size: 0.88rem !important;
         color: #ffffff !important;
     }
-    /* Selected State via DOM sibling matching */
     div[data-testid="stRadio"] label:has(input:checked) {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.3) 0%, rgba(82, 229, 231, 0.22) 100%) !important;
-        border: 1px solid rgba(82, 229, 231, 0.7) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.25) 0%, rgba(82, 229, 231, 0.18) 100%) !important;
+        border: 1px solid rgba(82, 229, 231, 0.6) !important;
         border-top: 1.5px solid #ffffff !important;
-        box-shadow: 0 0 20px rgba(82, 229, 231, 0.4), inset 0 1.5px 2px #ffffff !important;
+        box-shadow: 0 4px 18px rgba(82, 229, 231, 0.3) !important;
     }
 
-    /* ========================================================= */
-    /* 5. LIQUID GLASS CARDS & MATRICES                         */
-    /* ========================================================= */
+    /* ZERO-LAG CSS GRID & CARDS */
     .card-grid-container {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-        gap: 18px;
-        margin-top: 14px;
-        margin-bottom: 26px;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 16px;
+        margin-top: 12px;
+        margin-bottom: 24px;
     }
 
+    /* Content-visibility skips layout calculations for offscreen cards */
     .liquid-glass-card {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 100%);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-top: 1.5px solid rgba(255, 255, 255, 0.35);
-        border-radius: 20px;
-        padding: 20px 22px;
-        box-shadow: 
-            0 12px 32px rgba(0, 0, 0, 0.45),
-            inset 0 1px 1px rgba(255, 255, 255, 0.3);
-        position: relative;
-        will-change: transform;
-        transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+        content-visibility: auto;
+        contain-intrinsic-size: 0 160px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.02) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-top: 1.5px solid rgba(255, 255, 255, 0.28);
+        border-radius: 18px;
+        padding: 18px 20px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+        transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease;
     }
     .liquid-glass-card:hover {
-        transform: translateY(-3px);
-        border-color: rgba(82, 229, 231, 0.4);
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 25px rgba(82, 229, 231, 0.2), inset 0 1.5px 1.5px #fff;
+        transform: translate3d(0, -3px, 0);
+        border-color: rgba(82, 229, 231, 0.35);
     }
 
     .team-logo {
-        width: 34px;
-        height: 34px;
+        width: 32px;
+        height: 32px;
         object-fit: contain;
-        filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
     }
 
     .confidence-metric {
         font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 2rem;
+        font-size: 1.9rem;
         font-weight: 800;
-        background: linear-gradient(180deg, #ffffff 30%, #a5b4fc 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #ffffff;
     }
 
     .hero-gradient-text {
-        font-size: 2.3rem;
+        font-size: 2.2rem;
         letter-spacing: -0.035em;
         background: linear-gradient(135deg, #ffffff 20%, #52e5e7 60%, #c084fc 100%);
         -webkit-background-clip: text;
@@ -461,20 +404,19 @@ render_html("""
     }
 
     .prob-chip {
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-top: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
-        border-radius: 10px;
-        padding: 6px 4px;
-        font-size: 0.76rem;
+        background: rgba(255, 255, 255, 0.035);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        padding: 5px 3px;
+        font-size: 0.75rem;
         text-align: center;
     }
 </style>
+<div class="bg-canvas"></div>
 """)
 
 # =====================================================================
-# 3. FIXTURE PIPELINE
+# 3. FIXTURE PIPELINE (Pooled, non-blocking)
 # =====================================================================
 ALL_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1", "tier": 1},
@@ -589,17 +531,17 @@ with st.spinner("Computing real-time Poisson tensors..."):
     all_today_games = tier_1_games + tier_2_games + tier_3_games
 
 # =====================================================================
-# 4. APP HEADER WITH 3D GLASS SQUIRCLE
+# 4. APP HEADER
 # =====================================================================
 render_html(f"""
-<div style="display: flex; align-items: center; gap: 18px; margin-bottom: 24px;">
-    <div class="liquid-icon icon-cyan" style="width: 58px; height: 58px; border-radius: 18px; font-size: 1.8rem;">
+<div style="display: flex; align-items: center; gap: 16px; margin-bottom: 20px;">
+    <div class="liquid-icon icon-cyan" style="width: 52px; height: 52px; border-radius: 16px; font-size: 1.6rem;">
         ⚡
     </div>
     <div>
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
             <span class="glass-pill pill-cyan">Poisson 7x7 Engine</span>
-            <span style="font-size: 0.8rem; color: rgba(255,255,255,0.5);">{len(all_today_games)} Fixtures Active</span>
+            <span style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">{len(all_today_games)} Fixtures Active</span>
         </div>
         <h1 class="hero-gradient-text" style="margin: 0; line-height: 1.1;">Apex Quantitative Analytics</h1>
     </div>
@@ -620,47 +562,47 @@ def render_quant_grid(match_list):
         rec = m["recommendation"]
         cards_html.append(f"""
 <div class="liquid-glass-card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
         <span class="glass-pill {rec['badge']}">{rec['tier']}</span>
-        <span style="font-size: 0.78rem; color: rgba(255,255,255,0.45);">{m['league']} • {m['time']}</span>
+        <span style="font-size: 0.76rem; color: rgba(255,255,255,0.4);">{m['league']} • {m['time']}</span>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin: 12px 0;">
-        <div style="display: flex; align-items: center; gap: 10px; width: 44%;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+        <div style="display: flex; align-items: center; gap: 8px; width: 44%;">
             <img src="{m['home_logo']}" class="team-logo" loading="lazy" decoding="async"/>
-            <span style="font-size: 0.96rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{m['home']}</span>
+            <span style="font-size: 0.94rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{m['home']}</span>
         </div>
-        <span style="font-weight: 800; color: rgba(255,255,255,0.2); font-size: 0.8rem;">VS</span>
-        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: 44%; text-align: right;">
-            <span style="font-size: 0.96rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{m['away']}</span>
+        <span style="font-weight: 800; color: rgba(255,255,255,0.2); font-size: 0.78rem;">VS</span>
+        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 44%; text-align: right;">
+            <span style="font-size: 0.94rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{m['away']}</span>
             <img src="{m['away_logo']}" class="team-logo" loading="lazy" decoding="async"/>
         </div>
     </div>
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0;">
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0;">
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Home</span><br>
+            <span style="color: rgba(255,255,255,0.4);">Home</span><br>
             <b style="color: #fff;">{sim['1X2']['Home']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Draw</span><br>
+            <span style="color: rgba(255,255,255,0.4);">Draw</span><br>
             <b style="color: #fff;">{sim['1X2']['Draw']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Away</span><br>
+            <span style="color: rgba(255,255,255,0.4);">Away</span><br>
             <b style="color: #fff;">{sim['1X2']['Away']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">O 1.5</span><br>
+            <span style="color: rgba(255,255,255,0.4);">O 1.5</span><br>
             <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
         </div>
     </div>
-    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.06); margin: 12px 0;">
+    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
     <div style="display: flex; justify-content: space-between; align-items: flex-end;">
         <div>
-            <div style="font-size: 0.70rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Quant Edge</div>
-            <div style="font-size: 0.96rem; font-weight: 700; color: #ffffff;">{rec['market']}</div>
+            <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Quant Pick</div>
+            <div style="font-size: 0.94rem; font-weight: 700; color: #ffffff;">{rec['market']}</div>
         </div>
         <div style="text-align: right;">
-            <div style="font-size: 0.70rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Certainty</div>
+            <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Certainty</div>
             <div class="confidence-metric">{rec['confidence']}%</div>
         </div>
     </div>
@@ -672,58 +614,43 @@ def render_quant_grid(match_list):
 # TAB 1: MATCH BOARD
 # =====================================================================
 with tab_feed:
-    render_html("""
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom: 8px;">
-        <span class="glass-pill pill-cyan">🥇 Tier 1: World Elite Divisions</span>
-    </div>
-    """)
+    render_html('<span class="glass-pill pill-cyan">🥇 Tier 1: World Elite Divisions</span>')
     if tier_1_games:
         render_quant_grid(tier_1_games)
     else:
         st.info("No fixtures playing today in Tier 1 leagues.")
 
-    render_html("""
-    <div style="display:flex; align-items:center; gap:10px; margin-top: 20px; margin-bottom: 8px;">
-        <span class="glass-pill pill-violet">🥈 Tier 2: Strong Continental Leagues</span>
-    </div>
-    """)
+    render_html('<span class="glass-pill pill-violet" style="margin-top: 16px;">🥈 Tier 2: Strong Continental Leagues</span>')
     if tier_2_games:
         render_quant_grid(tier_2_games)
     else:
         st.info("No fixtures playing today in Tier 2 leagues.")
 
-    render_html("""
-    <div style="display:flex; align-items:center; gap:10px; margin-top: 20px; margin-bottom: 8px;">
-        <span class="glass-pill pill-green">🥉 Tier 3: Growth & Secondary Divisions</span>
-    </div>
-    """)
+    render_html('<span class="glass-pill pill-green" style="margin-top: 16px;">🥉 Tier 3: Growth & Secondary Divisions</span>')
     if tier_3_games:
         render_quant_grid(tier_3_games)
     else:
         st.info("No fixtures playing today in Tier 3 leagues.")
 
 # =====================================================================
-# TAB 2: SAFE BANKER HUB WITH LIQUID CONTROLS
+# TAB 2: SAFE BANKER HUB WITH LIQUID SELECTORS
 # =====================================================================
 with tab_surebets:
     render_html("""
-<div style="display: flex; align-items: center; gap: 16px; margin-bottom: 18px;">
+<div style="display: flex; align-items: center; gap: 14px; margin-bottom: 14px;">
     <div class="liquid-icon icon-green">
         🎯
     </div>
     <div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="glass-pill pill-green">Quant Banker Isolation</span>
-        </div>
-        <h2 style="margin: 4px 0 0 0; font-size: 1.6rem; color: #ffffff !important;">Safe Banker Filter Hub</h2>
+        <span class="glass-pill pill-green">Banker Isolation</span>
+        <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Safe Banker Filter Hub</h2>
     </div>
 </div>
-<p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.65); margin-bottom: 16px;">
-    Strictly isolates selections where simulated mathematical confidence exceeds 85.0% in low-variance markets.
+<p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
+    Strictly isolates selections where Poisson simulation confidence exceeds 85.0% in low-variance markets.
 </p>
 """)
 
-    # Streamlit Radio styled via our liquid glass CSS
     banker_mode = st.radio(
         "Banker Strategy Mode",
         ["🔥 3-Banker Safe Rollover", "⚡ 5-Banker Multi Slip", "💎 10-Odds Monster Banker"],
@@ -766,24 +693,24 @@ with tab_surebets:
             cards = []
             for item in selected_slip:
                 cards.append(f"""
-<div class="liquid-glass-card" style="margin-bottom: 14px; padding: 16px 20px;">
+<div class="liquid-glass-card" style="margin-bottom: 12px; padding: 14px 18px;">
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <span class="glass-pill pill-green">{item['league']}</span>
-        <span style="font-size: 0.95rem; color: #52e5e7; font-weight: 800;">Odds: {item['odds']}</span>
+        <span style="font-size: 0.92rem; color: #52e5e7; font-weight: 800;">Odds: {item['odds']}</span>
     </div>
-    <div style="margin: 10px 0;">
-        <h4 style="margin: 0; font-size: 1.15rem;">{item['match']}</h4>
-        <div style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">Kickoff: {item['time']}</div>
+    <div style="margin: 8px 0;">
+        <h4 style="margin: 0; font-size: 1.1rem;">{item['match']}</h4>
+        <div style="font-size: 0.78rem; color: rgba(255,255,255,0.4);">Kickoff: {item['time']}</div>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
-        <span style="font-size: 0.95rem; font-weight: 600; color: #fff;">{item['market']}</span>
-        <span style="font-size: 1.05rem; font-weight: 800; color: #30d158;">{item['confidence']}% Certainty</span>
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+        <span style="font-size: 0.92rem; font-weight: 600; color: #fff;">{item['market']}</span>
+        <span style="font-size: 1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Certainty</span>
     </div>
 </div>
 """)
             render_html("".join(cards))
         else:
-            st.info("No fixtures currently meet the strict ≥ 85.0% banker threshold.")
+            st.info("No fixtures currently meet the ≥ 85.0% banker criteria.")
 
     with c_right:
         if selected_slip:
@@ -796,19 +723,19 @@ with tab_surebets:
             render_html(f"""
 <div class="liquid-glass-card" style="border-color: rgba(82, 229, 231, 0.45);">
     <span class="glass-pill pill-cyan">{slip_label}</span>
-    <h3 style="margin: 14px 0 2px 0;">Ticket Overview</h3>
-    <p style="font-size: 0.82rem; color: rgba(255,255,255,0.45); margin-bottom: 14px;">Independent Joint Poisson Tensor</p>
-    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 12px 0;">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+    <h3 style="margin: 12px 0 2px 0;">Ticket Overview</h3>
+    <p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Compound Poisson Tensor</p>
+    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 10px 0;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
         <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Odds:</span>
-        <span style="font-size: 1.4rem; font-weight: 800; color: #52e5e7;">{round(tot_odds, 2)}</span>
+        <span style="font-size: 1.35rem; font-weight: 800; color: #52e5e7;">{round(tot_odds, 2)}</span>
     </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 14px;">
-        <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Compound Probability:</span>
-        <span style="font-size: 1.4rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+        <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Survival Rate:</span>
+        <span style="font-size: 1.35rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
     </div>
-    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; font-size: 0.8rem; line-height: 1.4;">
-        🛡️ <b>Optimal Rule:</b> High confidence rollover strategy recommended when joint survival exceeds 65%.
+    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
+        🛡️ <b>Optimal Rule:</b> Rollover compounding strategy advised when survival rate exceeds 65%.
     </div>
 </div>
 """)
@@ -818,19 +745,17 @@ with tab_surebets:
 # =====================================================================
 with tab_kelly:
     render_html("""
-<div style="display: flex; align-items: center; gap: 16px; margin-bottom: 18px;">
+<div style="display: flex; align-items: center; gap: 14px; margin-bottom: 14px;">
     <div class="liquid-icon icon-cyan">
         💰
     </div>
     <div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="glass-pill pill-cyan">Risk Management</span>
-        </div>
-        <h2 style="margin: 4px 0 0 0; font-size: 1.6rem; color: #ffffff !important;">Fractional Kelly Staking</h2>
+        <span class="glass-pill pill-cyan">Risk Management</span>
+        <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Fractional Kelly Staking</h2>
     </div>
 </div>
-<p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.65); margin-bottom: 16px;">
-    Mathematically maximize your geometric bankroll growth rate while preventing drawdown ruin.
+<p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
+    Determine the mathematically optimal stake size to maximize geometric growth while avoiding drawdown ruin.
 </p>
 """)
 
@@ -853,25 +778,25 @@ with tab_kelly:
             user_bankroll, model_prob_in, bookie_odds, kelly_fraction
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
-        edge_badge = 'pill-green' if calculated_edge > 0 else 'pill-red'
+        edge_badge = 'pill-green' if calculated_edge > 0 else 'pill-gold'
         edge_text = 'Positive Expectation (+EV)' if calculated_edge > 0 else 'Negative Expectation (-EV)'
         stake_color = '#30d158' if calculated_edge > 0 else '#ff453a'
         advice = '✅ <b>Edge Detected:</b> Modeled edge exceeds bookmaker implied probability.' if calculated_edge > 0 else '⚠️ <b>No Bet Advised:</b> Edge does not cover the bookmaker margin.'
 
         render_html(f"""
 <div class="liquid-glass-card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <span class="glass-pill {edge_badge}">{edge_text}</span>
-        <span style="font-size: 0.9rem; color: #52e5e7; font-weight: 700;">Edge: {calculated_edge}%</span>
+        <span style="font-size: 0.88rem; color: #52e5e7; font-weight: 700;">Edge: {calculated_edge}%</span>
     </div>
-    <h3 style="margin: 0 0 10px 0;">Target Allocation</h3>
-    <div style="margin: 16px 0;">
-        <div style="font-size: 0.78rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Recommended Stake</div>
-        <div style="font-size: 2.3rem; font-weight: 800; color: {stake_color};">
-            ${recommended_stake} <span style="font-size: 1.1rem; color: rgba(255,255,255,0.5);">({stake_pct}%)</span>
+    <h3 style="margin: 0 0 8px 0;">Target Allocation</h3>
+    <div style="margin: 14px 0;">
+        <div style="font-size: 0.74rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Recommended Stake</div>
+        <div style="font-size: 2.2rem; font-weight: 800; color: {stake_color};">
+            ${recommended_stake} <span style="font-size: 1rem; color: rgba(255,255,255,0.45);">({stake_pct}%)</span>
         </div>
     </div>
-    <div style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; font-size: 0.82rem; line-height: 1.4;">
+    <div style="padding: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; font-size: 0.8rem; line-height: 1.4;">
         {advice}
     </div>
 </div>
@@ -882,15 +807,13 @@ with tab_kelly:
 # =====================================================================
 with tab_analyzer:
     render_html("""
-<div style="display: flex; align-items: center; gap: 16px; margin-bottom: 18px;">
+<div style="display: flex; align-items: center; gap: 14px; margin-bottom: 14px;">
     <div class="liquid-icon icon-violet">
         🔬
     </div>
     <div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="glass-pill pill-violet">Matrix Engine</span>
-        </div>
-        <h2 style="margin: 4px 0 0 0; font-size: 1.6rem; color: #ffffff !important;">7x7 Joint Scoreline Simulation</h2>
+        <span class="glass-pill pill-violet">Matrix Engine</span>
+        <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">7x7 Joint Scoreline Simulation</h2>
     </div>
 </div>
 """)
@@ -908,9 +831,9 @@ with tab_analyzer:
             render_html(f"""
 <div class="liquid-glass-card">
     <span class="glass-pill pill-cyan">Poisson Parameters</span>
-    <h4 style="margin: 12px 0 16px 0;">Adjusted Expected Goals (xG)</h4>
-    <div style="margin-bottom: 14px;">
-        <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px;">
+    <h4 style="margin: 10px 0 14px 0;">Adjusted Expected Goals (xG)</h4>
+    <div style="margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
             <span>{target_match['home']} (Home Adv: 1.15x)</span>
             <span style="font-weight: 700; color: #52e5e7;">{sim_data['adj_home_xG']} xG</span>
         </div>
@@ -918,8 +841,8 @@ with tab_analyzer:
             <div style="width: {min(100, int(sim_data['adj_home_xG'] * 35))}%; height: 100%; background: #52e5e7; border-radius: 999px;"></div>
         </div>
     </div>
-    <div style="margin-bottom: 14px;">
-        <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px;">
+    <div style="margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
             <span>{target_match['away']}</span>
             <span style="font-weight: 700; color: #c084fc;">{sim_data['adj_away_xG']} xG</span>
         </div>
@@ -928,14 +851,14 @@ with tab_analyzer:
         </div>
     </div>
     <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 12px 0;">
-    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">Double Chance 1X</span><br>
-            <b style="color: #30d158; font-size: 1rem;">{sim_data['DoubleChance']['1X']}%</b>
+            <span style="color: rgba(255,255,255,0.4);">Double Chance 1X</span><br>
+            <b style="color: #30d158; font-size: 0.95rem;">{sim_data['DoubleChance']['1X']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.45);">BTTS (Yes)</span><br>
-            <b style="color: #52e5e7; font-size: 1rem;">{sim_data['BTTS']['Yes']}%</b>
+            <span style="color: rgba(255,255,255,0.4);">BTTS (Yes)</span><br>
+            <b style="color: #52e5e7; font-size: 0.95rem;">{sim_data['BTTS']['Yes']}%</b>
         </div>
     </div>
 </div>
@@ -944,8 +867,8 @@ with tab_analyzer:
         with col_m2:
             scorelines_html = "".join([
                 f"""
-<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
-    <span style="font-weight: 700; color: #fff; font-size: 1rem;">Scoreline: {s['score']}</span>
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
+    <span style="font-weight: 700; color: #fff; font-size: 0.95rem;">Scoreline: {s['score']}</span>
     <span class="glass-pill pill-cyan">{s['prob']}% Prob</span>
 </div>
 """
@@ -955,7 +878,7 @@ with tab_analyzer:
             render_html(f"""
 <div class="liquid-glass-card">
     <span class="glass-pill pill-violet">Highest Probability Outcomes</span>
-    <h4 style="margin: 12px 0 16px 0;">Most Probable Exact Scorelines</h4>
+    <h4 style="margin: 10px 0 14px 0;">Most Probable Exact Scorelines</h4>
     {scorelines_html}
 </div>
 """)
