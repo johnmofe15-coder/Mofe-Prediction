@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import math
 import numpy as np
+import textwrap
 from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,28 +14,23 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Helper function to prevent Streamlit from turning HTML into code blocks
+def render_html(html_str):
+    st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
+
 # =====================================================================
 # 1. QUANTITATIVE PREDICTION & POISSON SIMULATION ENGINE
 # =====================================================================
 class QuantitativePredictionEngine:
-    """
-    Industrial sports analytics engine implementing Poisson PMF score matrices,
-    market derivation, value-edge estimation, and Fractional Kelly sizing.
-    """
     def __init__(self, home_advantage=1.15):
         self.home_advantage = home_advantage
 
     def poisson_probability(self, lmbda: float, k: int) -> float:
-        """Computes Poisson probability for k goals given expected intensity lambda."""
         if lmbda <= 0:
             return 1.0 if k == 0 else 0.0
         return (math.exp(-lmbda) * (lmbda ** k)) / math.factorial(k)
 
     def simulate_match(self, home_xG: float, away_xG: float):
-        """
-        Generates 7x7 joint scoreline probability matrix (0-0 to 6-6)
-        and derives exact market probabilities.
-        """
         adj_home_xG = max(0.2, home_xG * self.home_advantage)
         adj_away_xG = max(0.2, away_xG)
 
@@ -48,7 +44,6 @@ class QuantitativePredictionEngine:
             for a in range(max_goals):
                 matrix[h][a] = home_probs[h] * away_probs[a]
 
-        # Accumulate markets
         home_win, draw, away_win = 0.0, 0.0, 0.0
         over_1_5, over_2_5, over_3_5 = 0.0, 0.0, 0.0
         btts_yes = 0.0
@@ -77,12 +72,10 @@ class QuantitativePredictionEngine:
                 if h > 0 and a > 0:
                     btts_yes += p
 
-        # Derived markets
         double_chance_1x = home_win + draw
         double_chance_x2 = away_win + draw
         double_chance_12 = home_win + away_win
 
-        # Sort top exact scorelines
         scorelines.sort(key=lambda x: x[1], reverse=True)
         top_scorelines = [{"score": f"{s[0][0]} - {s[0][1]}", "prob": round(s[1] * 100, 1)} for s in scorelines[:4]]
 
@@ -112,16 +105,9 @@ class QuantitativePredictionEngine:
         }
 
     def evaluate_tiers(self, probs: dict, home_name: str, away_name: str):
-        """
-        Classifies markets into:
-        1. Safe Banker Tier (Probability >= 85%)
-        2. Value Edge Tier (Positive expected value potential)
-        3. High Risk / Outright Tier (1X2 match winners)
-        """
         bankers = []
         value_picks = []
 
-        # Safe Banker Filters (Threshold: >= 85.0%)
         if probs["DoubleChance"]["1X"] >= 85.0:
             bankers.append({
                 "market": f"{home_name} or Draw (1X)",
@@ -148,7 +134,6 @@ class QuantitativePredictionEngine:
                 "odds": round(1.0 / (probs["Goals"]["Over_1_5"] / 100.0) * 1.06, 2)
             })
 
-        # Value Tier (BTTS or Over 2.5 when probability > 62%)
         if probs["Goals"]["Over_2_5"] >= 62.0:
             value_picks.append({
                 "market": "Over 2.5 Goals",
@@ -159,18 +144,17 @@ class QuantitativePredictionEngine:
             })
         if probs["BTTS"]["Yes"] >= 62.0:
             value_picks.append({
-                "market": "Both Teams to Score (Yes)",
+                "market": "BTTS (Yes)",
                 "confidence": probs["BTTS"]["Yes"],
                 "tier": "Value Edge",
                 "badge": "pill-violet",
                 "odds": round(1.0 / (probs["BTTS"]["Yes"] / 100.0) * 1.08, 2)
             })
 
-        # Fallback Outright Tier
         best_1x2_team = home_name if probs["1X2"]["Home"] > probs["1X2"]["Away"] else away_name
         best_1x2_prob = max(probs["1X2"]["Home"], probs["1X2"]["Away"])
 
-        primary_recommendation = (
+        primary_rec = (
             bankers[0] if bankers 
             else value_picks[0] if value_picks 
             else {
@@ -181,15 +165,10 @@ class QuantitativePredictionEngine:
                 "odds": round(1.0 / (best_1x2_prob / 100.0) * 0.95, 2)
             }
         )
-
-        return primary_recommendation, bankers, value_picks
+        return primary_rec, bankers, value_picks
 
     @staticmethod
     def calculate_kelly(bankroll: float, model_prob: float, bookmaker_odds: float, fraction: float = 0.25):
-        """
-        Fractional Kelly Criterion: f* = fraction * ((b*p - q) / b)
-        where b = decimal odds - 1, p = probability, q = 1 - p.
-        """
         if bookmaker_odds <= 1.0 or model_prob <= 0:
             return 0.0, 0.0
         p = model_prob / 100.0
@@ -205,13 +184,12 @@ class QuantitativePredictionEngine:
         stake_amount = round(bankroll * fractional_kelly, 2)
         return stake_amount, round(edge * 100, 2)
 
-# Instantiate the Quant Engine
 quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
 
 # =====================================================================
 # 2. UI LIQUID GLASSMORPHIC STYLING
 # =====================================================================
-st.markdown("""
+render_html("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
 
@@ -320,6 +298,7 @@ st.markdown("""
     .pill-green { color: #30d158; border: 1px solid rgba(48, 209, 88, 0.4); background: rgba(48, 209, 88, 0.1); }
     .pill-violet { color: #c084fc; border: 1px solid rgba(192, 132, 252, 0.4); background: rgba(192, 132, 252, 0.1); }
     .pill-gold { color: #ffd60a; border: 1px solid rgba(255, 214, 10, 0.4); background: rgba(255, 214, 10, 0.1); }
+    .pill-red { color: #ff453a; border: 1px solid rgba(255, 69, 58, 0.4); background: rgba(255, 69, 58, 0.1); }
 
     .team-logo {
         width: 34px;
@@ -347,12 +326,11 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
     }
 
-    /* Probability Grid Chip */
     .prob-chip {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.07);
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 10px;
-        padding: 6px 10px;
+        padding: 6px 4px;
         font-size: 0.78rem;
         text-align: center;
     }
@@ -360,7 +338,7 @@ st.markdown("""
 
 <div class="glow-orb-1"></div>
 <div class="glow-orb-2"></div>
-""", unsafe_allow_html=True)
+""")
 
 # =====================================================================
 # 3. LEAGUES & CONCURRENT LIVE DATA PIPELINE
@@ -434,12 +412,10 @@ def fetch_single_league(args):
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            # Derive synthetic baseline xG intensities
             seed = sum(ord(c) for c in (h_name + a_name))
             raw_h_xG = 1.30 + ((seed % 11) / 10.0)
             raw_a_xG = 0.95 + (((seed * 3) % 9) / 10.0)
 
-            # RUN QUANTITATIVE POISSON SIMULATION ENGINE
             sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG)
             rec, bankers, values = quant_engine.evaluate_tiers(sim, h_name, a_name)
 
@@ -481,17 +457,16 @@ all_today_games = tier_1_games + tier_2_games + tier_3_games
 # =====================================================================
 # 4. APP HEADER
 # =====================================================================
-st.markdown(f"""
-    <div style="margin-bottom: 20px;">
-        <span class="glass-pill pill-cyan">⚡ Poisson 7x7 Engine Active • {len(all_today_games)} Fixtures Simulating</span>
-        <h1 class="hero-gradient-text">Apex Quantitative Analytics</h1>
-        <p style="font-size: 0.95rem; color: rgba(255, 255, 255, 0.65); margin: 0;">
-            Joint probability distributions, multi-tier banker isolation, and Fractional Kelly bet sizing.
-        </p>
-    </div>
-""", unsafe_allow_html=True)
+render_html(f"""
+<div style="margin-bottom: 20px;">
+    <span class="glass-pill pill-cyan">⚡ Poisson 7x7 Engine Active • {len(all_today_games)} Fixtures Simulating</span>
+    <h1 class="hero-gradient-text">Apex Quantitative Analytics</h1>
+    <p style="font-size: 0.95rem; color: rgba(255, 255, 255, 0.65); margin: 0;">
+        Joint probability distributions, multi-tier banker isolation, and Fractional Kelly bet sizing.
+    </p>
+</div>
+""")
 
-# Tabs Navigation
 tab_feed, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     f"⚡ Daily Match Board ({len(all_today_games)})", 
     "🎯 Safe Banker Hub", 
@@ -499,7 +474,6 @@ tab_feed, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     "🔬 7x7 Simulation Matrix"
 ])
 
-# Helper for Match Card rendering
 def render_quant_cards(match_list):
     for i in range(0, len(match_list), 2):
         cols = st.columns(2)
@@ -509,93 +483,91 @@ def render_quant_cards(match_list):
                 sim = m["simulation"]
                 rec = m["recommendation"]
                 with cols[j]:
-                    st.markdown(f"""
-                    <div class="liquid-glass-card">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <span class="glass-pill {rec['badge']}">{rec['tier']}</span>
-                            <span style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">{m['league']} • {m['time']}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin: 14px 0;">
-                            <div style="display: flex; align-items: center; gap: 10px; width: 44%;">
-                                <img src="{m['home_logo']}" class="team-logo"/>
-                                <span style="font-size: 1.05rem; font-weight: 700; color: #fff;">{m['home']}</span>
-                            </div>
-                            <span style="font-weight: 700; color: rgba(255,255,255,0.25); font-size: 0.85rem;">VS</span>
-                            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: 44%; text-align: right;">
-                                <span style="font-size: 1.05rem; font-weight: 700; color: #fff;">{m['away']}</span>
-                                <img src="{m['away_logo']}" class="team-logo"/>
-                            </div>
-                        </div>
-                        
-                        <!-- Poisson Derived Probabilities Breakdown -->
-                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 14px 0;">
-                            <div class="prob-chip">
-                                <span style="color: rgba(255,255,255,0.5);">Home Win</span><br>
-                                <b style="color: #fff;">{sim['1X2']['Home']}%</b>
-                            </div>
-                            <div class="prob-chip">
-                                <span style="color: rgba(255,255,255,0.5);">Draw</span><br>
-                                <b style="color: #fff;">{sim['1X2']['Draw']}%</b>
-                            </div>
-                            <div class="prob-chip">
-                                <span style="color: rgba(255,255,255,0.5);">Away Win</span><br>
-                                <b style="color: #fff;">{sim['1X2']['Away']}%</b>
-                            </div>
-                            <div class="prob-chip">
-                                <span style="color: rgba(255,255,255,0.5);">Over 1.5</span><br>
-                                <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
-                            </div>
-                        </div>
-
-                        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 12px 0;">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-end;">
-                            <div>
-                                <div style="font-size: 0.72rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Quant Recommended Selection</div>
-                                <div style="font-size: 1.05rem; font-weight: 700; color: #ffffff;">{rec['market']}</div>
-                            </div>
-                            <div style="text-align: right;">
-                                <div style="font-size: 0.72rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Modeled Confidence</div>
-                                <div class="confidence-metric">{rec['confidence']}%</div>
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    card_markup = f"""
+<div class="liquid-glass-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <span class="glass-pill {rec['badge']}">{rec['tier']}</span>
+        <span style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">{m['league']} • {m['time']}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin: 14px 0;">
+        <div style="display: flex; align-items: center; gap: 10px; width: 44%;">
+            <img src="{m['home_logo']}" class="team-logo"/>
+            <span style="font-size: 1.05rem; font-weight: 700; color: #fff;">{m['home']}</span>
+        </div>
+        <span style="font-weight: 700; color: rgba(255,255,255,0.25); font-size: 0.85rem;">VS</span>
+        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: 44%; text-align: right;">
+            <span style="font-size: 1.05rem; font-weight: 700; color: #fff;">{m['away']}</span>
+            <img src="{m['away_logo']}" class="team-logo"/>
+        </div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 14px 0;">
+        <div class="prob-chip">
+            <span style="color: rgba(255,255,255,0.5);">Home Win</span><br>
+            <b style="color: #fff;">{sim['1X2']['Home']}%</b>
+        </div>
+        <div class="prob-chip">
+            <span style="color: rgba(255,255,255,0.5);">Draw</span><br>
+            <b style="color: #fff;">{sim['1X2']['Draw']}%</b>
+        </div>
+        <div class="prob-chip">
+            <span style="color: rgba(255,255,255,0.5);">Away Win</span><br>
+            <b style="color: #fff;">{sim['1X2']['Away']}%</b>
+        </div>
+        <div class="prob-chip">
+            <span style="color: rgba(255,255,255,0.5);">Over 1.5</span><br>
+            <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
+        </div>
+    </div>
+    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 12px 0;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+            <div style="font-size: 0.72rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Quant Pick</div>
+            <div style="font-size: 1.05rem; font-weight: 700; color: #ffffff;">{rec['market']}</div>
+        </div>
+        <div style="text-align: right;">
+            <div style="font-size: 0.72rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Confidence</div>
+            <div class="confidence-metric">{rec['confidence']}%</div>
+        </div>
+    </div>
+</div>
+"""
+                    render_html(card_markup)
 
 # =====================================================================
 # TAB 1: DAILY MATCH BOARD
 # =====================================================================
 with tab_feed:
-    st.markdown('<span class="glass-pill pill-cyan">🥇 World Leaders (Positions 1–10 + UCL/UEL)</span>', unsafe_allow_html=True)
+    render_html('<span class="glass-pill pill-cyan">🥇 World Leaders (Positions 1–10 + UCL/UEL)</span>')
     if tier_1_games:
         render_quant_cards(tier_1_games)
     else:
         st.info("No fixtures playing today in Tier 1.")
 
-    st.markdown('<span class="glass-pill pill-violet" style="margin-top: 16px;">🥈 Strong Continental Quality (Positions 11–20)</span>', unsafe_allow_html=True)
+    render_html('<span class="glass-pill pill-violet" style="margin-top: 16px;">🥈 Strong Continental Quality (Positions 11–20)</span>')
     if tier_2_games:
         render_quant_cards(tier_2_games)
     else:
         st.info("No fixtures playing today in Tier 2.")
 
-    st.markdown('<span class="glass-pill pill-green" style="margin-top: 16px;">🥉 Competitive Growth Divisions (Positions 21–30)</span>', unsafe_allow_html=True)
+    render_html('<span class="glass-pill pill-green" style="margin-top: 16px;">🥉 Competitive Growth Divisions (Positions 21–30)</span>')
     if tier_3_games:
         render_quant_cards(tier_3_games)
     else:
         st.info("No fixtures playing today in Tier 3.")
 
 # =====================================================================
-# TAB 2: SAFE BANKER HUB (STRICT >= 85% POISSON CRITERIA)
+# TAB 2: SAFE BANKER HUB
 # =====================================================================
 with tab_surebets:
-    st.markdown("""
-        <div style="margin-bottom: 18px;">
-            <span class="glass-pill pill-green">Quant Banker Isolation</span>
-            <h2 style="margin: 8px 0 4px 0;">🎯 Safe Banker Filter Hub</h2>
-            <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
-                Strictly isolates picks where simulated probability exceeds 85.0% across low-variance Double Chance or Over 1.5 markets.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
+    render_html("""
+<div style="margin-bottom: 18px;">
+    <span class="glass-pill pill-green">Quant Banker Isolation</span>
+    <h2 style="margin: 8px 0 4px 0;">🎯 Safe Banker Filter Hub</h2>
+    <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
+        Strictly isolates picks where simulated probability exceeds 85.0% across low-variance Double Chance or Over 1.5 markets.
+    </p>
+</div>
+""")
 
     banker_mode = st.radio(
         "Banker Accumulator Model",
@@ -603,7 +575,6 @@ with tab_surebets:
         horizontal=True
     )
 
-    # Filter all banker matches
     all_bankers = []
     for g in all_today_games:
         for b in g["bankers"]:
@@ -638,22 +609,22 @@ with tab_surebets:
     with c_left:
         if selected_slip:
             for item in selected_slip:
-                st.markdown(f"""
-                <div class="liquid-glass-card" style="padding: 16px 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span class="glass-pill pill-green">{item['league']}</span>
-                        <span style="font-size: 0.9rem; color: #52e5e7; font-weight: 800;">Odds: {item['odds']}</span>
-                    </div>
-                    <div style="margin: 8px 0;">
-                        <h4 style="margin: 0; font-size: 1.1rem;">{item['match']}</h4>
-                        <div style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">Kickoff: {item['time']}</div>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
-                        <span style="font-size: 1rem; font-weight: 700; color: #fff;">{item['market']}</span>
-                        <span style="font-size: 1.1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Poisson Certainty</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                render_html(f"""
+<div class="liquid-glass-card" style="padding: 16px 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span class="glass-pill pill-green">{item['league']}</span>
+        <span style="font-size: 0.9rem; color: #52e5e7; font-weight: 800;">Odds: {item['odds']}</span>
+    </div>
+    <div style="margin: 8px 0;">
+        <h4 style="margin: 0; font-size: 1.1rem;">{item['match']}</h4>
+        <div style="font-size: 0.8rem; color: rgba(255,255,255,0.45);">Kickoff: {item['time']}</div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+        <span style="font-size: 1rem; font-weight: 700; color: #fff;">{item['market']}</span>
+        <span style="font-size: 1.1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Poisson Certainty</span>
+    </div>
+</div>
+""")
         else:
             st.info("No fixtures today satisfy the strict >= 85% mathematical Banker threshold.")
 
@@ -666,40 +637,39 @@ with tab_surebets:
             for s in selected_slip:
                 joint_prob *= (s["confidence"] / 100.0)
 
-            st.markdown(f"""
-            <div class="liquid-glass-card" style="border: 1px solid rgba(82, 229, 231, 0.4); box-shadow: 0 0 25px rgba(82, 229, 231, 0.15);">
-                <span class="glass-pill pill-cyan">{slip_label}</span>
-                <h3 style="margin: 12px 0 4px 0;">Accumulator Summary</h3>
-                <p style="font-size: 0.82rem; color: rgba(255,255,255,0.5);">Engineered strictly from independent Poisson distributions.</p>
-                <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 12px 0;">
-                
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Ticket Odds:</span>
-                    <span style="font-size: 1.35rem; font-weight: 800; color: #52e5e7;">{round(tot_odds, 2)}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 14px;">
-                    <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Joint Ticket Survival:</span>
-                    <span style="font-size: 1.35rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
-                </div>
-                <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; font-size: 0.8rem; line-height: 1.4; color: rgba(255,255,255,0.65);">
-                    🛡️ <b>Variance Rule:</b> When survival rate exceeds 65%, use compounding rollover staking.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            render_html(f"""
+<div class="liquid-glass-card" style="border: 1px solid rgba(82, 229, 231, 0.4); box-shadow: 0 0 25px rgba(82, 229, 231, 0.15);">
+    <span class="glass-pill pill-cyan">{slip_label}</span>
+    <h3 style="margin: 12px 0 4px 0;">Accumulator Summary</h3>
+    <p style="font-size: 0.82rem; color: rgba(255,255,255,0.5);">Engineered strictly from independent Poisson distributions.</p>
+    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 12px 0;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Ticket Odds:</span>
+        <span style="font-size: 1.35rem; font-weight: 800; color: #52e5e7;">{round(tot_odds, 2)}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 14px;">
+        <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Joint Ticket Survival:</span>
+        <span style="font-size: 1.35rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; font-size: 0.8rem; line-height: 1.4; color: rgba(255,255,255,0.65);">
+        🛡️ <b>Variance Rule:</b> When survival rate exceeds 65%, use compounding rollover staking.
+    </div>
+</div>
+""")
 
 # =====================================================================
 # TAB 3: FRACTIONAL KELLY STAKING CALCULATOR
 # =====================================================================
 with tab_kelly:
-    st.markdown("""
-        <div style="margin-bottom: 18px;">
-            <span class="glass-pill pill-cyan">Quantitative Risk Management</span>
-            <h2 style="margin: 8px 0 4px 0;">💰 Fractional Kelly Staking Calculator</h2>
-            <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
-                Calculate the mathematically optimal bet size to maximize bankroll growth while avoiding drawdown risk.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
+    render_html("""
+<div style="margin-bottom: 18px;">
+    <span class="glass-pill pill-cyan">Quantitative Risk Management</span>
+    <h2 style="margin: 8px 0 4px 0;">💰 Fractional Kelly Staking Calculator</h2>
+    <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
+        Calculate the mathematically optimal bet size to maximize bankroll growth while avoiding drawdown risk.
+    </p>
+</div>
+""")
 
     col_k1, col_k2 = st.columns(2)
 
@@ -722,48 +692,47 @@ with tab_kelly:
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
 
-        st.markdown(f"""
-        <div class="liquid-glass-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-                <span class="glass-pill {'pill-green' if calculated_edge > 0 else 'pill-red'}">
-                    {'Positive Expectation (+EV)' if calculated_edge > 0 else 'Negative Expectation (-EV)'}
-                </span>
-                <span style="font-size: 0.85rem; color: #52e5e7; font-weight: 700;">Edge: {calculated_edge}%</span>
-            </div>
-            
-            <h3 style="margin: 0 0 10px 0;">Recommended Optimal Stake</h3>
-            
-            <div style="margin: 16px 0;">
-                <div style="font-size: 0.78rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Recommended Allocation</div>
-                <div style="font-size: 2.4rem; font-weight: 800; color: {'#30d158' if calculated_edge > 0 else '#ff453a'};">
-                    ${recommended_stake} <span style="font-size: 1.1rem; color: rgba(255,255,255,0.5);">({stake_pct}% of Bankroll)</span>
-                </div>
-            </div>
+        edge_badge = 'pill-green' if calculated_edge > 0 else 'pill-red'
+        edge_text = 'Positive Expectation (+EV)' if calculated_edge > 0 else 'Negative Expectation (-EV)'
+        stake_color = '#30d158' if calculated_edge > 0 else '#ff453a'
+        advice = '✅ <b>Edge Detected:</b> The model probability exceeds the bookmaker implied probability. Fractional Kelly limits portfolio drawdown.' if calculated_edge > 0 else '⚠️ <b>No Bet Advised:</b> The bookmaker margin outweighs your modeled edge. Staking here represents negative long-term value.'
 
-            <div style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; font-size: 0.82rem; line-height: 1.4;">
-                {'✅ <b>Edge Detected:</b> The model probability exceeds the bookmaker implied probability. Fractional Kelly limits portfolio drawdown.' if calculated_edge > 0 else '⚠️ <b>No Bet Advised:</b> The bookmaker margin outweighs your modeled edge. Staking here represents negative long-term value.'}
-            </div>
+        render_html(f"""
+<div class="liquid-glass-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+        <span class="glass-pill {edge_badge}">{edge_text}</span>
+        <span style="font-size: 0.85rem; color: #52e5e7; font-weight: 700;">Edge: {calculated_edge}%</span>
+    </div>
+    <h3 style="margin: 0 0 10px 0;">Recommended Optimal Stake</h3>
+    <div style="margin: 16px 0;">
+        <div style="font-size: 0.78rem; text-transform: uppercase; color: rgba(255,255,255,0.45);">Recommended Allocation</div>
+        <div style="font-size: 2.4rem; font-weight: 800; color: {stake_color};">
+            ${recommended_stake} <span style="font-size: 1.1rem; color: rgba(255,255,255,0.5);">({stake_pct}% of Bankroll)</span>
         </div>
-        """, unsafe_allow_html=True)
+    </div>
+    <div style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; font-size: 0.82rem; line-height: 1.4;">
+        {advice}
+    </div>
+</div>
+""")
 
 # =====================================================================
 # TAB 4: DEEP 7X7 POISSON SIMULATION MATRIX
 # =====================================================================
 with tab_analyzer:
-    st.markdown("""
-        <div style="margin-bottom: 18px;">
-            <span class="glass-pill pill-violet">Bivariate Poisson Simulation</span>
-            <h2 style="margin: 8px 0 4px 0;">🔬 7x7 Joint Scoreline Simulation Matrix</h2>
-            <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
-                Inspect the simulated goal distribution matrix and exact scoreline likelihoods for any live match.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
+    render_html("""
+<div style="margin-bottom: 18px;">
+    <span class="glass-pill pill-violet">Bivariate Poisson Simulation</span>
+    <h2 style="margin: 8px 0 4px 0;">🔬 7x7 Joint Scoreline Simulation Matrix</h2>
+    <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);">
+        Inspect the simulated goal distribution matrix and exact scoreline likelihoods for any live match.
+    </p>
+</div>
+""")
 
     match_select_opts = [f"{m['home']} vs {m['away']} ({m['league']})" for m in all_today_games] if all_today_games else ["Arsenal vs Chelsea (Premier League)"]
     selected_m_str = st.selectbox("Select Target Fixture", match_select_opts)
 
-    # Locate chosen match
     target_match = next((m for m in all_today_games if f"{m['home']} vs {m['away']} ({m['league']})" == selected_m_str), None)
 
     if target_match:
@@ -771,60 +740,57 @@ with tab_analyzer:
         col_m1, col_m2 = st.columns(2)
 
         with col_m1:
-            st.markdown(f"""
-            <div class="liquid-glass-card">
-                <span class="glass-pill pill-cyan">Lambda Parameterization</span>
-                <h4 style="margin: 12px 0 16px 0;">Adjusted Expected Goals (xG)</h4>
-                
-                <div style="margin-bottom: 14px;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px;">
-                        <span>{target_match['home']} Adjusted xG (Home Adv: 1.15x)</span>
-                        <span style="font-weight: 700; color: #52e5e7;">{sim_data['adj_home_xG']}</span>
-                    </div>
-                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
-                        <div style="width: {min(100, int(sim_data['adj_home_xG'] * 35))}%; height: 100%; background: #52e5e7; border-radius: 999px;"></div>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 14px;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px;">
-                        <span>{target_match['away']} Adjusted xG</span>
-                        <span style="font-weight: 700; color: #c084fc;">{sim_data['adj_away_xG']}</span>
-                    </div>
-                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
-                        <div style="width: {min(100, int(sim_data['adj_away_xG'] * 35))}%; height: 100%; background: #c084fc; border-radius: 999px;"></div>
-                    </div>
-                </div>
-
-                <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 14px 0;">
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                    <div class="prob-chip">
-                        <span style="color: rgba(255,255,255,0.5);">Double Chance 1X</span><br>
-                        <b style="color: #30d158; font-size: 1rem;">{sim_data['DoubleChance']['1X']}%</b>
-                    </div>
-                    <div class="prob-chip">
-                        <span style="color: rgba(255,255,255,0.5);">Both Teams To Score</span><br>
-                        <b style="color: #52e5e7; font-size: 1rem;">{sim_data['BTTS']['Yes']}%</b>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            render_html(f"""
+<div class="liquid-glass-card">
+    <span class="glass-pill pill-cyan">Lambda Parameterization</span>
+    <h4 style="margin: 12px 0 16px 0;">Adjusted Expected Goals (xG)</h4>
+    <div style="margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px;">
+            <span>{target_match['home']} Adjusted xG (Home Adv: 1.15x)</span>
+            <span style="font-weight: 700; color: #52e5e7;">{sim_data['adj_home_xG']}</span>
+        </div>
+        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
+            <div style="width: {min(100, int(sim_data['adj_home_xG'] * 35))}%; height: 100%; background: #52e5e7; border-radius: 999px;"></div>
+        </div>
+    </div>
+    <div style="margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 4px;">
+            <span>{target_match['away']} Adjusted xG</span>
+            <span style="font-weight: 700; color: #c084fc;">{sim_data['adj_away_xG']}</span>
+        </div>
+        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px;">
+            <div style="width: {min(100, int(sim_data['adj_away_xG'] * 35))}%; height: 100%; background: #c084fc; border-radius: 999px;"></div>
+        </div>
+    </div>
+    <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 14px 0;">
+    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+        <div class="prob-chip">
+            <span style="color: rgba(255,255,255,0.5);">Double Chance 1X</span><br>
+            <b style="color: #30d158; font-size: 1rem;">{sim_data['DoubleChance']['1X']}%</b>
+        </div>
+        <div class="prob-chip">
+            <span style="color: rgba(255,255,255,0.5);">Both Teams To Score</span><br>
+            <b style="color: #52e5e7; font-size: 1rem;">{sim_data['BTTS']['Yes']}%</b>
+        </div>
+    </div>
+</div>
+""")
 
         with col_m2:
-            st.markdown("""
-            <div class="liquid-glass-card">
-                <span class="glass-pill pill-violet">Highest Mass Points</span>
-                <h4 style="margin: 12px 0 16px 0;">Most Probable Exact Scorelines</h4>
-            """, unsafe_allow_html=True)
-
+            scorelines_html = ""
             for s in sim_data["top_scorelines"]:
-                st.markdown(f"""
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
-                    <span style="font-weight: 700; color: #fff; font-size: 1.05rem;">Scoreline: {s['score']}</span>
-                    <span class="glass-pill pill-cyan">{s['prob']}% Probability</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.markdown('</div>', unsafe_allow_html=True)
+                scorelines_html += f"""
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
+    <span style="font-weight: 700; color: #fff; font-size: 1.05rem;">Scoreline: {s['score']}</span>
+    <span class="glass-pill pill-cyan">{s['prob']}% Probability</span>
+</div>
+"""
+            render_html(f"""
+<div class="liquid-glass-card">
+    <span class="glass-pill pill-violet">Highest Mass Points</span>
+    <h4 style="margin: 12px 0 16px 0;">Most Probable Exact Scorelines</h4>
+    {scorelines_html}
+</div>
+""")
     else:
         st.info("Select an active fixture to inspect the simulation.")
