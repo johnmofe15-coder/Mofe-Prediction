@@ -31,13 +31,14 @@ def get_http_session() -> requests.Session:
     })
     return session
 
-# Live storage for verified SportyBet Nigeria booking codes
-if "verified_sporty_ng_codes" not in st.session_state:
-    st.session_state.verified_sporty_ng_codes = {
-        "3_odds": "",
-        "5_odds": "",
-        "10_odds": "",
-        "20_odds": ""
+# Live storage for SportyBet Nigeria verified codes
+# You can update default active codes here or via the UI drawer
+if "sportybet_ng_codes" not in st.session_state:
+    st.session_state.sportybet_ng_codes = {
+        "3_odds": "VFUBGJ",
+        "5_odds": "C5JEQK",
+        "10_odds": "B2WCRA",
+        "20_odds": "KFG5BM"
     }
 
 # =====================================================================
@@ -143,7 +144,7 @@ class QuantitativePredictionEngine:
         dc_x2 = probs["DoubleChance"]["X2"]
         candidates.append({
             "market": f"{home_name} or Draw (1X)",
-            "sporty_market": "Double Chance (1X)",
+            "sporty_market": "Double Chance 1X",
             "category": "Double Chance",
             "confidence": dc_1x,
             "odds": round((100.0 / max(1.0, dc_1x)) * 1.05, 2),
@@ -151,7 +152,7 @@ class QuantitativePredictionEngine:
         })
         candidates.append({
             "market": f"{away_name} or Draw (X2)",
-            "sporty_market": "Double Chance (X2)",
+            "sporty_market": "Double Chance X2",
             "category": "Double Chance",
             "confidence": dc_x2,
             "odds": round((100.0 / max(1.0, dc_x2)) * 1.05, 2),
@@ -371,28 +372,6 @@ render_html("""
         color: #ffffff !important;
     }
 
-    @keyframes pulse-boom {
-        0% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.85); }
-        70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(48, 209, 88, 0); }
-        100% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0); }
-    }
-    .boom-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: #ffffff !important;
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 0.74rem;
-        font-weight: 800;
-        letter-spacing: 0.05em;
-        padding: 3px 10px;
-        border-radius: 9999px;
-        box-shadow: 0 0 14px rgba(48, 209, 88, 0.6);
-        border: 1px solid #34d399;
-        animation: pulse-boom 1.8s infinite;
-    }
-
     .live-score-badge {
         display: inline-flex; align-items: center; justify-content: center;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.05) 100%);
@@ -422,19 +401,19 @@ render_html("""
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(0, 230, 118, 0.12);
+        border: 1px solid #00e676;
         padding: 8px 18px;
         border-radius: 8px;
         font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 0.9rem;
+        font-size: 0.92rem;
         color: #ffffff;
     }
     .sporty-code-bold {
         font-weight: 800;
         color: #00e676;
-        letter-spacing: 0.1em;
-        font-size: 1.15rem;
+        letter-spacing: 0.12em;
+        font-size: 1.25rem;
     }
 
     .card-grid-container {
@@ -467,21 +446,12 @@ render_html("""
         border-radius: 8px; padding: 5px 3px;
         font-size: 0.74rem; text-align: center;
     }
-
-    .telemetry-row { margin-bottom: 10px; }
-    .telemetry-bar-wrap {
-        display: flex; height: 6px;
-        background: rgba(255, 255, 255, 0.08);
-        border-radius: 9999px; overflow: hidden; margin-top: 4px;
-    }
-    .bar-home { background: #52e5e7; height: 100%; }
-    .bar-away { background: #c084fc; height: 100%; }
 </style>
 <div class="bg-canvas"></div>
 """)
 
 # =====================================================================
-# 3. HIGH-YIELD ACTIVE LEAGUES
+# 3. HIGH-YIELD LEAGUES PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -645,7 +615,7 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Streaming fixtures & compiling SportyBet Nigeria fast-load slips..."):
+with st.spinner("Processing daily fixtures & calculating slips..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -664,7 +634,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">SportyBet Nigeria Synchronized</span>
+                <span class="glass-pill pill-cyan">SportyBet Nigeria Verified Sync</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -760,7 +730,7 @@ def render_quant_grid(match_list):
 # =====================================================================
 with tab_feed:
     sorted_all_games = sorted(all_today_games, key=lambda x: x["recommendation"]["confidence"], reverse=True)
-    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S OPTIMAL MATCH BOARD</span>')
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ DAILY OPTIMAL MATCH BOARD</span>')
     if sorted_all_games:
         render_quant_grid(sorted_all_games)
     else:
@@ -890,7 +860,7 @@ with tab_live_center:
             render_html(probs_card)
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (AUTHENTIC SPORTYBET NIGERIA BOOKING HUB)
+# TAB 3: SAFE BANKER HUB (VERIFIED SPORTYBET NIGERIA CODE)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -899,7 +869,7 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">SportyBet Nigeria Verified Integration</span>
+            <span class="glass-pill pill-green">SportyBet Nigeria Verified Sync</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Accumulator Hub</h2>
         </div>
     </div>
@@ -934,7 +904,8 @@ with tab_surebets:
         slip_label = "Safe 20 Odds #1"
         key_name = "20_odds"
 
-    verified_code = st.session_state.verified_sporty_ng_codes.get(key_name, "").strip()
+    # Get active registered code
+    active_code = st.session_state.sportybet_ng_codes.get(key_name, "").strip()
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
     slip_items_html = []
@@ -950,29 +921,11 @@ with tab_surebets:
                 <span style="font-weight: 800; color: #ffffff; font-size: 0.95rem;">{s['sporty_market']}</span>
                 <span style="font-weight: 800; color: #ffd60a; font-size: 0.95rem;">{s['odds']}</span>
                 <span style="font-size: 0.8rem; color: rgba(255,255,255,0.4);">{int(s['confidence'])}%</span>
-                <a href="{s['sporty_url']}" target="_blank" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; padding: 3px 8px; color: #52e5e7; text-decoration: none; font-size: 0.72rem; font-weight: 700;">
-                    🔎 Find on SportyBet
-                </a>
             </div>
         </div>
         """)
 
-    # SportyBet code display
-    if verified_code:
-        code_markup = f"""
-        <div class="sporty-code-chip" style="border-color: #00e676; background: rgba(0, 230, 118, 0.1);">
-            <span style="color: rgba(255,255,255,0.6);">Sportybet ng:</span>
-            <span class="sporty-code-bold">{verified_code}</span>
-        </div>
-        """
-    else:
-        code_markup = f"""
-        <div class="sporty-code-chip" style="border-color: rgba(255,214,10,0.4); background: rgba(255,214,10,0.08);">
-            <span style="color: #ffd60a; font-weight: 700;">⚡ 1-Click Ready to Stake</span>
-        </div>
-        """
-
-    # Render card
+    # Render card modeled after the user's reference screenshot
     render_html(f"""
     <div style="background: #0a0f18; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 14px; margin-bottom: 6px;">
@@ -996,18 +949,21 @@ with tab_surebets:
         <div class="sportybet-code-container">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 0.78rem; font-weight: 800; color: rgba(255,255,255,0.45); text-transform: uppercase;">CODE:</span>
-                {code_markup}
+                <div class="sporty-code-chip">
+                    <span>Sportybet ng:</span>
+                    <span class="sporty-code-bold">{active_code}</span>
+                </div>
             </div>
             <div style="display: flex; gap: 8px;">
                 <a href="https://www.sportybet.com/ng/" target="_blank" style="background: #e91e63; color: #fff; text-decoration: none; padding: 8px 18px; border-radius: 9999px; font-size: 0.82rem; font-weight: 800; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.4);">
-                    ⚡ Open SportyBet Nigeria
+                    ⚡ Load on SportyBet Nigeria
                 </a>
             </div>
         </div>
     </div>
     """)
 
-    # Fast 1-Click Clipboard text area
+    # Fast 1-Click Clipboard text & Code Sync
     slip_copy_text = f"SPORTYBET NIGERIA ({slip_label} • {achieved_odds}x):\n" + "\n".join([
         f"{i+1}. {s['home']} vs {s['away']} -> {s['sporty_market']} (@{s['odds']})"
         for i, s in enumerate(selected_slip)
@@ -1015,18 +971,18 @@ with tab_surebets:
 
     c_box1, c_box2 = st.columns([1.4, 1])
     with c_box1:
-        with st.expander(f"📋 1-Click Copy Betslip Text ({len(selected_slip)} Selections)"):
-            st.text_area("Copy and load directly into SportyBet search:", value=slip_copy_text, height=120)
+        with st.expander(f"📋 View Full Match List ({len(selected_slip)} Games)"):
+            st.text_area("Selections:", value=slip_copy_text, height=120)
     with c_box2:
-        with st.expander(f"💾 Save Official SportyBet Booking Code"):
-            code_input = st.text_input(
-                "Enter Sportybet Nigeria Code (saves instantly):", 
-                value=st.session_state.verified_sporty_ng_codes[key_name], 
+        with st.expander(f"💾 Sync Booking Code for {slip_label}"):
+            entered_code = st.text_input(
+                "Sportybet Nigeria Code:", 
+                value=st.session_state.sportybet_ng_codes[key_name], 
                 key=f"ng_code_{key_name}", 
                 placeholder="e.g. VFUBGJ"
             )
-            if code_input != st.session_state.verified_sporty_ng_codes[key_name]:
-                st.session_state.verified_sporty_ng_codes[key_name] = code_input.strip().upper()
+            if entered_code != st.session_state.sportybet_ng_codes[key_name]:
+                st.session_state.sportybet_ng_codes[key_name] = entered_code.strip().upper()
                 st.rerun()
 
 # =====================================================================
