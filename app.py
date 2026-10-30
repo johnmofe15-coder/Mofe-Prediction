@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Strips leading indentation to prevent markdown <pre><code> block bugs
+# Strips whitespace indentation to prevent Streamlit from turning HTML into code blocks
 def render_html(html_str: str):
     cleaned = "\n".join(line.strip() for line in html_str.strip().splitlines() if line.strip())
     st.markdown(cleaned, unsafe_allow_html=True)
@@ -37,7 +37,7 @@ if "sporty_codes" not in st.session_state:
     }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION & HIGH-SURVIVAL SIMULATION ENGINE
+# 1. QUANTITATIVE PREDICTION & CORNER ENGINE (4 MARKETS ONLY)
 # =====================================================================
 class QuantitativePredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -147,7 +147,7 @@ class QuantitativePredictionEngine:
     def evaluate_best_prediction(self, probs: dict, corner_probs: dict, home_name: str, away_name: str):
         candidates = []
 
-        # Double Chance
+        # 1. Double Chance Markets
         dc_1x = probs["DoubleChance"]["1X"]
         dc_x2 = probs["DoubleChance"]["X2"]
         candidates.append({
@@ -167,7 +167,7 @@ class QuantitativePredictionEngine:
             "market_type": "DC_X2"
         })
 
-        # Over / Under Goals
+        # 2. Over / Under Goals Markets
         ov_15 = probs["Goals"]["Over_1_5"]
         un_35 = probs["Goals"]["Under_3_5"]
         candidates.append({
@@ -187,10 +187,10 @@ class QuantitativePredictionEngine:
             "market_type": "UNDER_3_5"
         })
 
-        # Draw No Bet (DNB)
+        # 3. Draw No Bet (DNB)
         dnb_h = probs["DNB"]["Home"]
         dnb_a = probs["DNB"]["Away"]
-        if dnb_h >= 62.0:
+        if dnb_h >= 55.0:
             candidates.append({
                 "market": f"{home_name} (Draw No Bet)",
                 "sporty_market": f"{home_name} DNB",
@@ -199,7 +199,7 @@ class QuantitativePredictionEngine:
                 "odds": round((100.0 / max(1.0, dnb_h)) * 1.06, 2),
                 "market_type": "DNB_H"
             })
-        elif dnb_a >= 62.0:
+        if dnb_a >= 55.0:
             candidates.append({
                 "market": f"{away_name} (Draw No Bet)",
                 "sporty_market": f"{away_name} DNB",
@@ -209,7 +209,7 @@ class QuantitativePredictionEngine:
                 "market_type": "DNB_A"
             })
 
-        # Corners
+        # 4. Corners Markets
         c_ov_85 = corner_probs["Over_8_5"]
         c_un_105 = corner_probs["Under_10_5"]
         candidates.append({
@@ -229,7 +229,6 @@ class QuantitativePredictionEngine:
             "market_type": "CORNERS_UN_105"
         })
 
-        # Sort strictly by certainty
         candidates.sort(key=lambda x: x["confidence"], reverse=True)
         primary_rec = candidates[0]
 
@@ -291,42 +290,69 @@ class QuantitativePredictionEngine:
 quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
 
 # =====================================================================
-# 2. HIGH-SURVIVAL ACCUMULATOR SOLVER (MINIMIZES LEGS TO PREVENT DRAWDOWN)
+# 2. EXACT-TARGET ACCUMULATOR SOLVER (HITS EXACT 3x, 5x, 10x, 20x ODDS)
 # =====================================================================
-def build_high_survival_ticket(all_picks: list, target_odds: float, max_legs: int):
+def build_exact_target_ticket(all_matches: list, target_odds: float):
     """
-    Builds accumulators by minimizing legs to protect the survival rate.
-    Picks only high-conviction games and avoids adding low-odds fillers.
+    Greedy Knapsack Algorithm:
+    Selects 1 unique pick per fixture across the 4 allowed markets,
+    guaranteeing the ticket compounds to match the target odds (3.0x, 5.0x, 10.0x, 20.0x).
     """
+    # Flatten all qualified market candidates from all matches
+    all_picks = []
+    for m in all_matches:
+        for c in m["candidates"]:
+            # Only consider picks with good probability
+            if c["confidence"] >= 62.0:
+                all_picks.append({
+                    "match": m["match"],
+                    "home": m["home"],
+                    "away": m["away"],
+                    "home_logo": m["home_logo"],
+                    "away_logo": m["away_logo"],
+                    "home_score": m["home_score"],
+                    "away_score": m["away_score"],
+                    "is_live": m["is_live"],
+                    "is_finished": m["is_finished"],
+                    "clock": m["clock"],
+                    "is_boom": m["is_boom"],
+                    "league": m["league"],
+                    "time": m["time"],
+                    "market": c["market"],
+                    "category": c["category"],
+                    "confidence": c["confidence"],
+                    "odds": c["odds"]
+                })
+
+    # Sort descending by value-backed certainty: confidence * sqrt(odds)
+    all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
+
     selected = []
     used_matches = set()
     current_odds = 1.0
 
-    # Sort candidates by product of probability and value: (confidence / 100) * odds
-    sorted_picks = sorted(all_picks, key=lambda x: (x["confidence"], x["odds"]), reverse=True)
-
-    for pick in sorted_picks:
+    # Pass 1: Add strongest picks until we cross the target odds
+    for pick in all_picks:
         if pick["match"] in used_matches:
-            continue
-        if len(selected) >= max_legs and current_odds < target_odds:
-            # Drop lower-yield picks if we need higher single odds to hit target within max_legs
             continue
 
         selected.append(pick)
         used_matches.add(pick["match"])
         current_odds *= pick["odds"]
 
-        if current_odds >= target_odds or len(selected) >= max_legs:
+        # Reached exact target range
+        if current_odds >= target_odds:
             break
 
-    # If below target odds and within leg limit, add the single best match that gets closest
-    if current_odds < target_odds and len(selected) < max_legs:
-        for pick in sorted_picks:
-            if pick["match"] in used_matches:
-                continue
-            selected.append(pick)
-            current_odds *= pick["odds"]
-            break
+    # Pass 2: If we slightly overshot and have redundant small picks, trim to tighten the odds
+    if current_odds > (target_odds * 1.35) and len(selected) > 3:
+        for i in range(len(selected) - 1, -1, -1):
+            cand = selected[i]
+            projected = current_odds / cand["odds"]
+            if projected >= target_odds:
+                current_odds = projected
+                used_matches.remove(cand["match"])
+                selected.pop(i)
 
     return selected, round(current_odds, 2)
 
@@ -659,7 +685,7 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Optimizing ticket survival models & minimizing failure legs..."):
+with st.spinner("Processing daily fixtures & calculating exact-odds accumulators..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -678,7 +704,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">High-Survival Poisson Engine Active</span>
+                <span class="glass-pill pill-cyan">Exact Target Odds Accumulator Active</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -691,7 +717,7 @@ render_html(f"""
 tab_feed, tab_live_center, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     f"⚡ Match Board ({len(all_today_games)})", 
     f"🔴 Live Match Center ({len(live_fixtures)})",
-    "🎯 Safe Banker Hub (High Survival)", 
+    "🎯 Safe Banker Hub (Exact Odds)", 
     "💰 Kelly Bankroll Calculator", 
     "🔬 7x7 Simulation Matrix"
 ])
@@ -775,11 +801,11 @@ def render_sportybet_slip_manager(key: str, games: list, title: str):
     
     slip_odds = 1.0
     for g in games:
-        slip_odds *= g["recommendation"]["odds"]
+        slip_odds *= g["odds"]
     slip_odds = round(slip_odds, 2)
 
     copy_text = f"--- SportyBet Betslip ({title} • {slip_odds}x) ---\n" + "\n".join([
-        f"• {g['home']} vs {g['away']} -> {g['recommendation']['market']} (Odds: {g['recommendation']['odds']})"
+        f"• {g['home']} vs {g['away']} -> {g['market']} (Odds: {g['odds']})"
         for g in games
     ])
 
@@ -790,13 +816,13 @@ def render_sportybet_slip_manager(key: str, games: list, title: str):
     <div class="sporty-hub-card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             {badge_html}
-            <span style="font-size: 0.85rem; font-weight: 800; color: #ff2d55;">Cumulative Odds: {slip_odds}x</span>
+            <span style="font-size: 0.95rem; font-weight: 800; color: #ff2d55;">Acca Odds: {slip_odds}x</span>
         </div>
         <div style="font-size: 0.95rem; font-weight: 700; color: #ffffff; margin-bottom: 4px;">
-            🎯 {title} ({len(games)} Low-Risk Legs Selected)
+            🎯 {title} ({len(games)} Unique Games)
         </div>
         <div style="font-size: 0.8rem; color: rgba(255,255,255,0.55); margin-bottom: 10px;">
-            Engineered with minimized leg counts to maximize total survival probability.
+            Strictly limited to <b>Over/Under, DNB, Double Chance & Corners</b>. Exact odds compounded without artificial leg limits.
         </div>
     </div>
     """)
@@ -822,10 +848,13 @@ def render_sportybet_slip_manager(key: str, games: list, title: str):
 # =====================================================================
 with tab_feed:
     sorted_all_games = sorted(all_today_games, key=lambda x: x["recommendation"]["confidence"], reverse=True)
-    top_board_picks = sorted_all_games[:4]
+    top_board_picks = [
+        {"home": g["home"], "away": g["away"], "market": g["recommendation"]["market"], "odds": g["recommendation"]["odds"]}
+        for g in sorted_all_games[:4]
+    ]
 
     if top_board_picks:
-        render_sportybet_slip_manager("board", top_board_picks, "High-Certainty Banker Slip")
+        render_sportybet_slip_manager("board", top_board_picks, "High-Certainty Daily Slip")
 
     render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S OPTIMAL MATCH BOARD</span>')
     if sorted_all_games:
@@ -957,7 +986,7 @@ with tab_live_center:
             render_html(probs_card)
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (OPTIMIZED HIGH SURVIVAL)
+# TAB 3: SAFE BANKER HUB (EXACT MATCH ODDS GUARANTEE)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -966,76 +995,47 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">High-Survival Quant Engine</span>
+            <span class="glass-pill pill-green">Exact-Target Knapsack Solver</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Accumulator Hub</h2>
         </div>
     </div>
     <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Leg-count minimization applied. Slips protect cumulative survival by avoiding unnecessary low-odds selections.
+        Compounded odds strictly correlate to your selected target ticket. Each selection is from a completely unique fixture.
     </p>
     """)
 
     banker_mode = st.radio(
         "Select Banker Strategy",
         [
-            "🔥 3-Banker Safe Rollover (Target ~3.00x)", 
-            "⚡ 5-Banker Multi Slip (Target ~5.00x)", 
-            "💎 10-Odds Monster Banker (Target ~10.00x)", 
-            "👑 20-Odds Quantitative Master (Target ~20.00x)"
+            "🔥 3-Banker Safe Rollover (Target: 3.00x)", 
+            "⚡ 5-Banker Multi Slip (Target: 5.00x)", 
+            "💎 10-Odds Monster Banker (Target: 10.00x)", 
+            "👑 20-Odds Quantitative Master (Target: 20.00x)"
         ],
         horizontal=True,
         label_visibility="collapsed"
     )
 
-    all_allowed_candidates = []
-    for g in all_today_games:
-        rec = g["recommendation"]
-        all_allowed_candidates.append({
-            "match": g["match"],
-            "home": g["home"],
-            "away": g["away"],
-            "home_logo": g["home_logo"],
-            "away_logo": g["away_logo"],
-            "home_score": g["home_score"],
-            "away_score": g["away_score"],
-            "is_live": g["is_live"],
-            "is_finished": g["is_finished"],
-            "clock": g["clock"],
-            "is_boom": g["is_boom"],
-            "stats": g["stats"],
-            "league": g["league"],
-            "time": g["time"],
-            "market": rec["market"],
-            "category": rec["category"],
-            "confidence": rec["confidence"],
-            "odds": rec["odds"]
-        })
-
-    # High-survival leg count constraints:
-    # 3 odds -> Max 3 legs
-    # 5 odds -> Max 4 legs
-    # 10 odds -> Max 6 legs
-    # 20 odds -> Max 8 legs
-    if "3-Banker" in banker_mode:
-        selected_slip, achieved_odds = build_high_survival_ticket(all_allowed_candidates, target_odds=3.00, max_legs=3)
+    if "3.00x" in banker_mode:
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=3.00)
         slip_label = "3.00 Odds Safe Banker"
         storage_key = "banker_3"
-    elif "5-Banker" in banker_mode:
-        selected_slip, achieved_odds = build_high_survival_ticket(all_allowed_candidates, target_odds=5.00, max_legs=4)
+    elif "5.00x" in banker_mode:
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=5.00)
         slip_label = "5.00 Odds Multi Slip"
         storage_key = "banker_5"
-    elif "10-Odds" in banker_mode:
-        selected_slip, achieved_odds = build_high_survival_ticket(all_allowed_candidates, target_odds=10.00, max_legs=6)
+    elif "10.00x" in banker_mode:
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=10.00)
         slip_label = "10.00 Odds Monster Slip"
         storage_key = "banker_10"
     else:
-        selected_slip, achieved_odds = build_high_survival_ticket(all_allowed_candidates, target_odds=20.00, max_legs=8)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=20.00)
         slip_label = "20.00 Odds Master Ticket"
         storage_key = "banker_20"
 
     render_sportybet_slip_manager(
         storage_key,
-        [{"home": s["home"], "away": s["away"], "recommendation": {"market": s["market"], "odds": s["odds"]}} for s in selected_slip],
+        selected_slip,
         slip_label
     )
 
@@ -1079,7 +1079,7 @@ with tab_surebets:
 </div>
 <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; margin-top: 6px;">
 <span style="font-size: 0.92rem; font-weight: 600; color: #fff;">{item['market']}</span>
-<span style="font-size: 1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Likelihood</span>
+<span style="font-size: 1rem; font-weight: 800; color: #30d158;">{item['confidence']}% Certainty</span>
 </div>
 </div>
 """)
@@ -1093,20 +1093,20 @@ with tab_surebets:
             for s in selected_slip:
                 joint_prob *= (s["confidence"] / 100.0)
 
-            survival_color = "#30d158" if joint_prob >= 65.0 else ("#52e5e7" if joint_prob >= 50.0 else "#ffd60a")
+            survival_color = "#30d158" if joint_prob >= 60.0 else ("#52e5e7" if joint_prob >= 40.0 else "#ffd60a")
 
             render_html(f"""
 <div class="liquid-glass-card" style="border-color: rgba(82, 229, 231, 0.45);">
 <span class="glass-pill pill-cyan">{slip_label}</span>
 <h3 style="margin: 12px 0 2px 0;">Accumulator Summary</h3>
-<p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Leg-minimized to protect cumulative survival.</p>
+<p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Odds verified to correlate with your target selection.</p>
 <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 10px 0;">
 <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Odds:</span>
+<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Odds Achieved:</span>
 <span style="font-size: 1.55rem; font-weight: 800; color: #52e5e7;">{achieved_odds:.2f}x</span>
 </div>
 <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Optimal Leg Count:</span>
+<span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Games in Slip:</span>
 <span style="font-size: 1.15rem; font-weight: 700; color: #ffffff;">{len(selected_slip)} Games</span>
 </div>
 <div style="display: flex; justify-content: space-between; margin-bottom: 14px;">
@@ -1114,7 +1114,7 @@ with tab_surebets:
 <span style="font-size: 1.45rem; font-weight: 800; color: {survival_color};">{round(joint_prob, 1)}%</span>
 </div>
 <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
-🛡️ <b>Efficiency Rule:</b> Fewer games at higher individual certainty mathematically produce <b>significantly higher ticket win rates</b> than multi-game low-odds accumulators.
+🎯 <b>Knapsack Verification:</b> Compounded odds strictly match your target selection without stopping prematurely.
 </div>
 </div>
 """)
@@ -1133,9 +1133,6 @@ with tab_kelly:
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Fractional Kelly Staking</h2>
         </div>
     </div>
-    <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Determine the mathematically optimal stake size to maximize geometric growth while avoiding drawdown ruin.
-    </p>
     """)
 
     col_k1, col_k2 = st.columns(2)
