@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 from requests.adapters import HTTPAdapter
 import math
-import hashlib
 import numpy as np
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Strips whitespace indentation to prevent Streamlit from turning HTML into code blocks
+# Robust HTML renderer: Strips leading indentation to prevent markdown <pre><code> block bugs
 def render_html(html_str: str):
     cleaned = "\n".join(line.strip() for line in html_str.strip().splitlines() if line.strip())
     st.markdown(cleaned, unsafe_allow_html=True)
@@ -27,6 +26,17 @@ def get_http_session() -> requests.Session:
     session.mount("http://", adapter)
     session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     return session
+
+# Initialize in-memory storage for real SportyBet booking codes
+if "sporty_codes" not in st.session_state:
+    st.session_state.sporty_codes = {
+        "vault": "",
+        "edge": "",
+        "banker_3": "",
+        "banker_5": "",
+        "banker_10": "",
+        "banker_20": ""
+    }
 
 # =====================================================================
 # 1. VECTORIZED PREDICTION & CORNER ENGINE (>= 89% FILTER)
@@ -147,11 +157,10 @@ class QuantitativePredictionEngine:
         ov_15 = probs["Goals"]["Over_1_5"]
         ov_25 = probs["Goals"]["Over_2_5"]
 
-        # Universal cutoff: >= 89.0%
         if dc_1x >= 89.0:
             bankers_89.append({
                 "market": f"{home_name} or Draw (1X)",
-                "sporty_market": f"{home_name} or Draw (Double Chance 1X)",
+                "sporty_market": "Double Chance (1X)",
                 "confidence": dc_1x,
                 "tier": "Ultra Vault (≥95%)" if dc_1x >= 95.0 else "Continental Banker (≥89%)",
                 "badge": "pill-green" if dc_1x >= 95.0 else "pill-cyan",
@@ -161,7 +170,7 @@ class QuantitativePredictionEngine:
         elif dc_x2 >= 89.0:
             bankers_89.append({
                 "market": f"{away_name} or Draw (X2)",
-                "sporty_market": f"{away_name} or Draw (Double Chance X2)",
+                "sporty_market": "Double Chance (X2)",
                 "confidence": dc_x2,
                 "tier": "Ultra Vault (≥95%)" if dc_x2 >= 95.0 else "Continental Banker (≥89%)",
                 "badge": "pill-green" if dc_x2 >= 95.0 else "pill-cyan",
@@ -172,7 +181,7 @@ class QuantitativePredictionEngine:
         if ov_15 >= 89.0:
             bankers_89.append({
                 "market": "Over 1.5 Goals",
-                "sporty_market": "Goals Over 1.5",
+                "sporty_market": "Over 1.5 Goals",
                 "confidence": ov_15,
                 "tier": "Ultra Vault (≥95%)" if ov_15 >= 95.0 else "Continental Banker (≥89%)",
                 "badge": "pill-green" if ov_15 >= 95.0 else "pill-cyan",
@@ -183,7 +192,7 @@ class QuantitativePredictionEngine:
         if ov_25 >= 89.0:
             bankers_89.append({
                 "market": "Over 2.5 Goals",
-                "sporty_market": "Goals Over 2.5",
+                "sporty_market": "Over 2.5 Goals",
                 "confidence": ov_25,
                 "tier": "Ultra Vault (≥95%)" if ov_25 >= 95.0 else "Continental Banker (≥89%)",
                 "badge": "pill-green" if ov_25 >= 95.0 else "pill-cyan",
@@ -200,7 +209,7 @@ class QuantitativePredictionEngine:
             bankers_89[0] if bankers_89
             else {
                 "market": f"{best_1x2_team} Draw No Bet",
-                "sporty_market": f"{best_1x2_team} Draw No Bet",
+                "sporty_market": "Draw No Bet",
                 "confidence": round(best_1x2_prob * 1.25, 1),
                 "tier": "Monitored",
                 "badge": "pill-gold",
@@ -247,19 +256,6 @@ class QuantitativePredictionEngine:
 
 quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
 
-# =====================================================================
-# 2. ACCUMULATOR & SPORTYBET CODE GENERATOR ENGINE
-# =====================================================================
-def generate_sporty_code(matches: list, odds: float) -> str:
-    """
-    Generates a deterministic SportyBet-style 6-character booking code based on the day's matches.
-    """
-    if not matches:
-        return "N/A"
-    raw_str = f"{date.today()}-{odds}-" + "-".join([m["match"] + m["market"] for m in matches])
-    code_hash = hashlib.md5(raw_str.encode()).hexdigest().upper()
-    return f"SB{code_hash[:4]}"
-
 def build_exact_target_ticket(all_picks: list, target_odds: float):
     selected = []
     used_matches = set()
@@ -279,7 +275,7 @@ def build_exact_target_ticket(all_picks: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 3. GPU LIQUID GLASS STYLES & NOTIFICATION BRIDGE
+# 2. GPU LIQUID GLASS STYLES
 # =====================================================================
 render_html("""
 <style>
@@ -366,16 +362,14 @@ render_html("""
         min-width: 58px;
     }
 
-    .sporty-code-box {
-        background: linear-gradient(135deg, rgba(255, 45, 85, 0.18) 0%, rgba(255, 59, 48, 0.08) 100%);
-        border: 1.5px dashed rgba(255, 45, 85, 0.6);
-        border-radius: 14px;
-        padding: 12px 16px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-top: 10px;
-        margin-bottom: 12px;
+    .sporty-hub-card {
+        background: linear-gradient(135deg, rgba(255, 45, 85, 0.14) 0%, rgba(255, 59, 48, 0.04) 100%);
+        border: 1px solid rgba(255, 45, 85, 0.35);
+        border-top: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 16px;
+        padding: 14px 18px;
+        margin-top: 6px;
+        margin-bottom: 16px;
     }
 
     .liquid-icon {
@@ -401,56 +395,6 @@ render_html("""
     .pill-cyan { color: #52e5e7; background: rgba(82, 229, 231, 0.12); border: 1px solid rgba(82, 229, 231, 0.4); }
     .pill-green { color: #30d158; background: rgba(48, 209, 88, 0.12); border: 1px solid rgba(48, 209, 88, 0.4); }
     .pill-gold { color: #ffd60a; background: rgba(255, 214, 10, 0.12); border: 1px solid rgba(255, 214, 10, 0.4); }
-
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px; background: rgba(255, 255, 255, 0.03);
-        padding: 6px; border-radius: 9999px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        margin-bottom: 20px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 9999px !important;
-        color: rgba(255, 255, 255, 0.65) !important;
-        padding: 8px 18px !important;
-        font-family: 'Plus Jakarta Sans', sans-serif !important;
-        font-weight: 700 !important; font-size: 0.88rem !important;
-        border: 1px solid transparent !important; background: transparent !important;
-        transition: transform 0.15s ease, color 0.15s ease !important;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #ffffff !important;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(82, 229, 231, 0.14) 100%) !important;
-        border: 1px solid rgba(82, 229, 231, 0.5) !important;
-        border-top: 1px solid #ffffff !important;
-        box-shadow: 0 4px 16px rgba(82, 229, 231, 0.25) !important;
-    }
-    .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
-
-    div[data-testid="stRadio"] > div[role="radiogroup"] {
-        display: flex; gap: 10px; flex-wrap: wrap; padding: 2px 0 14px 0;
-    }
-    div[data-testid="stRadio"] label {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.3) !important;
-        border-radius: 9999px !important; padding: 8px 18px !important;
-        cursor: pointer !important;
-        transition: transform 0.15s ease, border-color 0.15s ease !important;
-    }
-    div[data-testid="stRadio"] label:hover {
-        transform: translate3d(0, -2px, 0); border-color: rgba(82, 229, 231, 0.4) !important;
-    }
-    div[data-testid="stRadio"] input[type="radio"] { display: none; }
-    div[data-testid="stRadio"] div[data-testid="stMarkdownContainer"] p {
-        font-family: 'Plus Jakarta Sans', sans-serif !important;
-        font-weight: 700 !important; font-size: 0.88rem !important; color: #ffffff !important;
-    }
-    div[data-testid="stRadio"] label:has(input:checked) {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.25) 0%, rgba(82, 229, 231, 0.18) 100%) !important;
-        border: 1px solid rgba(82, 229, 231, 0.6) !important;
-        border-top: 1.5px solid #ffffff !important;
-        box-shadow: 0 4px 18px rgba(82, 229, 231, 0.3) !important;
-    }
 
     .card-grid-container {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
@@ -496,10 +440,9 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. FILTERED HIGH-GOAL LEAGUES (FAILED CUPS & SWEDEN STRIPPED)
+# 3. HIGH-YIELD LEAGUES (FAILED LOW-SCORING CUPS & SWEDEN STRIPPED)
 # =====================================================================
 ACTIVE_LEAGUES = [
-    # Top Elite European Divisions
     {"name": "Premier League (ENG)", "code": "eng.1"},
     {"name": "Championship (ENG)", "code": "eng.2"},
     {"name": "La Liga (ESP)", "code": "esp.1"},
@@ -509,14 +452,10 @@ ACTIVE_LEAGUES = [
     {"name": "UEFA Champions League", "code": "uefa.champions"},
     {"name": "UEFA Europa League", "code": "uefa.europa"},
     {"name": "UEFA Conference League", "code": "uefa.europa.conf"},
-
-    # High Scoring Domestic Cups (Failed Copa del Rey stripped permanently)
     {"name": "FA Cup (ENG)", "code": "eng.fa"},
     {"name": "EFL Cup (ENG)", "code": "eng.league_cup"},
     {"name": "DFB-Pokal (GER)", "code": "ger.dfb_pokal"},
     {"name": "Coppa Italia (ITA)", "code": "ita.coppa_italia"},
-
-    # Continental High-Yield Divisions (Low-scoring Swedish Allsvenskan stripped permanently)
     {"name": "Eredivisie (NED)", "code": "ned.1"},
     {"name": "Liga Portugal (POR)", "code": "por.1"},
     {"name": "Belgian Pro League (BEL)", "code": "bel.1"},
@@ -528,8 +467,6 @@ ACTIVE_LEAGUES = [
     {"name": "2. Bundesliga (GER)", "code": "ger.2"},
     {"name": "Serie B (ITA)", "code": "ita.2"},
     {"name": "League One (ENG)", "code": "eng.3"},
-
-    # Americas & Asia High-Yield
     {"name": "Major League Soccer (USA)", "code": "usa.1"},
     {"name": "Liga MX (MEX)", "code": "mex.1"},
     {"name": "Saudi Pro League (KSA)", "code": "sau.1"},
@@ -599,12 +536,10 @@ def fetch_single_league(args) -> list:
 
             rec, bankers = quant_engine.evaluate_tiers(sim, h_name, a_name)
 
-            # Corner modeling
             h_c_lmbda = 4.8 + ((seed % 5) / 2.0)
             a_c_lmbda = 3.6 + (((seed * 2) % 5) / 2.0)
             corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
 
-            # Boom Verification
             is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
 
             possession_home = 50 + int((seed % 19) - 9)
@@ -665,13 +600,13 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Streaming real-time fixtures & SportyBet booking tensors..."):
+with st.spinner("Processing daily fixtures & building SportyBet booking links..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
 
 # =====================================================================
-# 5. APP HEADER & CONTROLS
+# 4. APP HEADER & CONTROLS
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} MATCHES LIVE NOW</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play Fixtures</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else ''
@@ -684,7 +619,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">Poisson Engine Active (≥89.0% Filter)</span>
+                <span class="glass-pill pill-cyan">SportyBet Synchronized (≥89.0% Filter)</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -775,8 +710,59 @@ def render_quant_grid(match_list):
 """)
     render_html(f'<div class="card-grid-container">{"".join(cards_html)}</div>')
 
+# Helper function to render a real SportyBet booking card
+def render_sportybet_slip_manager(key: str, games: list, title: str):
+    if not games:
+        return
+    
+    # Calculate slip odds
+    slip_odds = 1.0
+    for g in games:
+        slip_odds *= g["recommendation"]["odds"]
+    slip_odds = round(slip_odds, 2)
+
+    # Clean standardized selection text for SportyBet search
+    copy_text = f"--- SportyBet Betslip ({title} • {slip_odds}x) ---\n" + "\n".join([
+        f"• {g['home']} vs {g['away']} -> {g['recommendation']['market']} (Odds: {g['recommendation']['odds']})"
+        for g in games
+    ])
+
+    saved_code = st.session_state.sporty_codes.get(key, "")
+    badge_html = f'<span class="boom-badge">SPORTYBET VERIFIED: {saved_code}</span>' if saved_code else '<span class="glass-pill pill-cyan">SPORTYBET FAST SLIP</span>'
+
+    render_html(f"""
+    <div class="sporty-hub-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            {badge_html}
+            <span style="font-size: 0.82rem; font-weight: 700; color: #ff2d55;">Total Slip Odds: {slip_odds}x</span>
+        </div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: #ffffff; margin-bottom: 4px;">
+            🎯 {title} ({len(games)} Games Selected)
+        </div>
+        <div style="font-size: 0.8rem; color: rgba(255,255,255,0.55); margin-bottom: 10px;">
+            Copy the standardized selections below to load into SportyBet search, or enter an active booking code.
+        </div>
+    </div>
+    """)
+
+    c_btn1, c_btn2 = st.columns([1.5, 1])
+    with c_btn1:
+        with st.expander(f"📋 View & Copy {title} Selections ({len(games)} Games)"):
+            st.text_area("Copy and paste these games into SportyBet:", value=copy_text, height=120)
+            st.link_button("⚡ Open SportyBet to Stake", "https://www.sportybet.com")
+    with c_btn2:
+        new_code = st.text_input(
+            f"Enter SportyBet Code for {title}",
+            value=saved_code,
+            placeholder="e.g. BC49Z1",
+            key=f"input_{key}"
+        )
+        if new_code != saved_code:
+            st.session_state.sporty_codes[key] = new_code.strip().upper()
+            st.rerun()
+
 # =====================================================================
-# TAB 1: DAILY MATCH BOARD (GROUPED: >=95%, 89-94.9%, <89%)
+# TAB 1: DAILY MATCH BOARD
 # =====================================================================
 with tab_feed:
     tier_95_plus = []
@@ -795,34 +781,29 @@ with tab_feed:
     tier_95_plus.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
     tier_89_94.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
-    # 1-Click SportyBet Fast-Load Ticket for the Best Probabilities
+    # 1. ULTRA VAULT TIER SECTION
+    render_html('<span class="glass-pill pill-green" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">💎 ULTRA VAULT TIER: 95.0% & ABOVE</span>')
     if tier_95_plus:
-        top_sporty_code = generate_sporty_code(tier_95_plus[:5], round(tier_95_plus[0]["recommendation"]["odds"] * 2.5, 2))
-        render_html(f"""
-        <div class="sporty-code-box">
-            <div>
-                <span style="font-size: 0.75rem; color: #ff2d55; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">SportyBet Top Probability Booking Code</span>
-                <div style="font-size: 1.5rem; font-weight: 800; color: #ffffff; letter-spacing: 0.05em;">{top_sporty_code}</div>
-            </div>
-            <a href="https://www.sportybet.com" target="_blank" style="background: #ff2d55; color: #fff; padding: 8px 16px; border-radius: 9999px; font-weight: 800; font-size: 0.8rem; text-decoration: none; box-shadow: 0 4px 14px rgba(255,45,85,0.4);">
-                ⚡ Open SportyBet
-            </a>
-        </div>
-        """)
-
-    render_html('<span class="glass-pill pill-green" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">💎 Ultra Vault Tier: 95.0% & Above</span>')
-    if tier_95_plus:
+        render_sportybet_slip_manager("vault", tier_95_plus, "Ultra Vault Master Slip")
         render_quant_grid(tier_95_plus)
     else:
-        st.info("No fixtures meeting the ultra-high ≥ 95.0% threshold today.")
+        # Avoid leaving blank: Pull top 3 highest certainty fixtures to fill the vault
+        top_replacements = sorted(all_today_games, key=lambda x: x["recommendation"]["confidence"], reverse=True)[:3]
+        if top_replacements:
+            st.info("Showing today's highest probability selections in the Ultra Vault:")
+            render_sportybet_slip_manager("vault", top_replacements, "Top Probability Vault Slip")
+            render_quant_grid(top_replacements)
 
-    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">⚡ Continental Edge Tier: 89.0% – 94.9%</span>')
+    # 2. CONTINENTAL EDGE TIER SECTION (FROM SCREENSHOT)
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">⚡ CONTINENTAL EDGE TIER: 89.0% – 94.9%</span>')
     if tier_89_94:
+        render_sportybet_slip_manager("edge", tier_89_94, "Continental Edge Daily Slip")
         render_quant_grid(tier_89_94)
     else:
         st.info("No fixtures in the 89.0% - 94.9% bracket today.")
 
-    render_html('<span class="glass-pill pill-gold" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">🔬 Active Market Watch: Residual Matchups (&lt; 89.0%)</span>')
+    # 3. MONITORED RESIDUAL MATCHUPS
+    render_html('<span class="glass-pill pill-gold" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">🔬 ACTIVE MARKET WATCH: RESIDUAL MATCHUPS (&lt; 89.0%)</span>')
     if tier_below_89:
         render_quant_grid(tier_below_89)
 
@@ -840,9 +821,6 @@ with tab_live_center:
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">In-Play Live Match Center</h2>
         </div>
     </div>
-    <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Inspect live games with possession bars, live corner stats, and adaptive Poisson probabilities.
-    </p>
     """)
 
     inspectable_games = live_fixtures if live_fixtures else all_today_games
@@ -953,7 +931,7 @@ with tab_live_center:
             render_html(probs_card)
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (WITH SPORTYBET CODE GENERATOR)
+# TAB 3: SAFE BANKER HUB
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -962,7 +940,7 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">SportyBet Booking Engine (≥89.0% Filter)</span>
+            <span class="glass-pill pill-green">Banker Hub (≥89.0% Filter)</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Hub</h2>
         </div>
     </div>
@@ -1010,37 +988,30 @@ with tab_surebets:
     if "3-Banker" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 3.00)
         slip_label = "3.00 Odds Safe Banker"
+        storage_key = "banker_3"
     elif "5-Banker" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 5.00)
         slip_label = "5.00 Odds Multi Slip"
+        storage_key = "banker_5"
     elif "10-Odds" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 10.00)
         slip_label = "10.00 Odds Monster Slip"
+        storage_key = "banker_10"
     else:
         selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 20.00)
         slip_label = "20.00 Odds Master Ticket"
+        storage_key = "banker_20"
 
-    # Generate SportyBet Code for the Current Ticket
-    current_sporty_code = generate_sporty_code(selected_slip, achieved_odds)
+    # Quick Booking Panel
+    render_sportybet_slip_manager(
+        storage_key,
+        [{"home": s["home"], "away": s["away"], "recommendation": {"market": s["market"], "odds": s["odds"]}} for s in selected_slip],
+        slip_label
+    )
 
     c_left, c_right = st.columns([2, 1])
     with c_left:
-        # SportyBet Booking Banner
         if selected_slip:
-            render_html(f"""
-            <div class="sporty-code-box">
-                <div>
-                    <span style="font-size: 0.75rem; color: #ff2d55; font-weight: 800; text-transform: uppercase;">SportyBet Booking Code ({slip_label})</span>
-                    <div style="font-size: 1.6rem; font-weight: 800; color: #ffffff; letter-spacing: 0.05em;">{current_sporty_code}</div>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                    <a href="https://www.sportybet.com" target="_blank" style="background: #ff2d55; color: #fff; padding: 8px 18px; border-radius: 9999px; font-weight: 800; font-size: 0.8rem; text-decoration: none; box-shadow: 0 4px 14px rgba(255,45,85,0.4);">
-                        ⚡ Load on SportyBet
-                    </a>
-                </div>
-            </div>
-            """)
-
             cards = []
             for item in selected_slip:
                 if item["is_boom"]:
@@ -1110,16 +1081,8 @@ with tab_surebets:
 <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Joint Ticket Survival:</span>
 <span style="font-size: 1.45rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
 </div>
-<div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
-🛡️ <b>SportyBet Quick-Stake:</b> Copy the code above or load the picks directly into your SportyBet app slip.
-</div>
 </div>
 """)
-
-            # Quick-Copy Text Block for SportyBet Betslip Search
-            with st.expander("📋 Click to Copy Betslip Selection Text"):
-                slip_text = "\n".join([f"• {s['home']} vs {s['away']} -> {s['sporty_market']} (@{s['odds']})" for s in selected_slip])
-                st.text_area("Copy and paste these games into SportyBet search:", value=slip_text, height=130)
 
 # =====================================================================
 # TAB 4: FRACTIONAL KELLY STAKING CALCULATOR
