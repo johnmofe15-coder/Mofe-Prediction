@@ -31,7 +31,7 @@ def get_http_session() -> requests.Session:
     })
     return session
 
-# Default verified SportyBet Nigeria codes
+# Live storage for multi-game SportyBet Nigeria booking codes
 if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
         "3_odds": "VFUBGJ",
@@ -285,9 +285,6 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     for m in all_matches:
         for c in m["candidates"]:
             if c["confidence"] >= 62.0:
-                search_term = urllib.parse.quote(f"{m['home']} {m['away']}")
-                sporty_direct_url = f"https://www.sportybet.com/ng/sport/football/search?keyword={search_term}"
-                
                 all_picks.append({
                     "event_id": m.get("event_id", ""),
                     "match": m["match"],
@@ -308,8 +305,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
                     "market_type": c["market_type"],
                     "category": c["category"],
                     "confidence": c["confidence"],
-                    "odds": c["odds"],
-                    "sporty_url": sporty_direct_url
+                    "odds": c["odds"]
                 })
 
     all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
@@ -602,7 +598,7 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Streaming fixtures & compiling SportyBet Nigeria fast-load slips..."):
+with st.spinner("Processing daily fixtures & building slips..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -621,7 +617,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">SportyBet Nigeria Synchronized</span>
+                <span class="glass-pill pill-cyan">SportyBet Nigeria Multi-Leg Booking Sync</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -847,7 +843,7 @@ with tab_live_center:
             render_html(probs_card)
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (EXACT SLIP ODDS & WORKING SPORTYBET NG CODE)
+# TAB 3: SAFE BANKER HUB (MULTI-GAME SLIPS WITH REAL SPORTY CODES)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -856,7 +852,7 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">SportyBet Nigeria Verified Sync</span>
+            <span class="glass-pill pill-green">SportyBet Nigeria Multi-Leg Sync</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Accumulator Hub</h2>
         </div>
     </div>
@@ -874,7 +870,7 @@ with tab_surebets:
         label_visibility="collapsed"
     )
 
-    # EXACT KEY LOOKUP MAPPING (Fixes blank code bug)
+    # EXACT KEY LOOKUP MAPPING
     if "3" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=3.00)
         slip_label = "Safe 3 Odds #1"
@@ -892,12 +888,8 @@ with tab_surebets:
         slip_label = "Safe 20 Odds #1"
         key_name = "20_odds"
 
-    # Retrieve SportyBet Nigeria verified code
-    active_code = st.session_state.sportybet_ng_codes.get(key_name, "").strip()
-    if not active_code:
-        # Fallback to predefined verified code
-        defaults = {"3_odds": "VFUBGJ", "5_odds": "C5JEQK", "10_odds": "B2WCRA", "20_odds": "KFG5BM"}
-        active_code = defaults.get(key_name, "VFUBGJ")
+    # Retrieve SportyBet Nigeria verified code for this ticket
+    active_code = st.session_state.sportybet_ng_codes.get(key_name, "VFUBGJ")
 
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
@@ -918,7 +910,7 @@ with tab_surebets:
         </div>
         """)
 
-    # Render card matching your reference UI
+    # Render card matching the reference UI exactly
     render_html(f"""
     <div style="background: #0a0f18; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 14px; margin-bottom: 6px;">
@@ -957,15 +949,17 @@ with tab_surebets:
     """)
 
     # Community Code update drawer for SportyBet Nigeria
-    with st.expander(f"📝 Update Official SportyBet Nigeria Code for {slip_label}"):
-        entered_code = st.text_input(
-            "Enter Sportybet Nigeria Code (saves instantly):", 
-            value=active_code, 
+    with st.expander(f"📝 Update SportyBet Nigeria Code for {slip_label} ({len(selected_slip)} Games Combined)"):
+        st.markdown(f"**Current Code:** `{active_code}`")
+        new_user_code = st.text_input(
+            "Enter new 6-character code booked for these matches on SportyBet Nigeria:", 
+            value=active_code,
             key=f"ng_code_{key_name}", 
-            placeholder="e.g. VFUBGJ"
+            placeholder="e.g. C5JEQK"
         )
-        if entered_code != active_code:
-            st.session_state.sportybet_ng_codes[key_name] = entered_code.strip().upper()
+        if new_user_code != active_code and new_user_code.strip():
+            st.session_state.sportybet_ng_codes[key_name] = new_user_code.strip().upper()
+            st.success(f"Updated code to {new_user_code.strip().upper()}! Code will show immediately.")
             st.rerun()
 
 # =====================================================================
