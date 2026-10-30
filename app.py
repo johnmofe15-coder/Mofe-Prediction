@@ -28,7 +28,7 @@ def get_http_session() -> requests.Session:
     return session
 
 # =====================================================================
-# 1. VECTORIZED PREDICTION & CORNER SIMULATION ENGINE
+# 1. VECTORIZED PREDICTION & CORNER SIMULATION ENGINE (>= 89.0% FILTER)
 # =====================================================================
 class QuantitativePredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -140,70 +140,59 @@ class QuantitativePredictionEngine:
         }
 
     def evaluate_tiers(self, probs: dict, home_name: str, away_name: str):
-        bankers_strict = []  # >= 96.0% exclusively
-        secondary_picks = []
-
+        bankers_89 = []
         dc_1x = probs["DoubleChance"]["1X"]
         dc_x2 = probs["DoubleChance"]["X2"]
         ov_15 = probs["Goals"]["Over_1_5"]
         ov_25 = probs["Goals"]["Over_2_5"]
 
-        # Strict >= 96.0% Banker Rule
-        if dc_1x >= 96.0:
-            bankers_strict.append({
+        # Universal cutoff lowered to >= 89.0%
+        if dc_1x >= 89.0:
+            bankers_89.append({
                 "market": f"{home_name} or Draw (1X)",
                 "confidence": dc_1x,
-                "tier": "Safe Banker (≥96%)",
-                "badge": "pill-green",
+                "tier": "Ultra Vault (≥95%)" if dc_1x >= 95.0 else "Continental Banker (≥89%)",
+                "badge": "pill-green" if dc_1x >= 95.0 else "pill-cyan",
                 "odds": round((100.0 / max(1.0, dc_1x)) * 1.05, 2),
                 "market_type": "DC_1X"
             })
-        elif dc_x2 >= 96.0:
-            bankers_strict.append({
+        elif dc_x2 >= 89.0:
+            bankers_89.append({
                 "market": f"{away_name} or Draw (X2)",
                 "confidence": dc_x2,
-                "tier": "Safe Banker (≥96%)",
-                "badge": "pill-green",
+                "tier": "Ultra Vault (≥95%)" if dc_x2 >= 95.0 else "Continental Banker (≥89%)",
+                "badge": "pill-green" if dc_x2 >= 95.0 else "pill-cyan",
                 "odds": round((100.0 / max(1.0, dc_x2)) * 1.05, 2),
                 "market_type": "DC_X2"
             })
 
-        if ov_15 >= 96.0:
-            bankers_strict.append({
+        if ov_15 >= 89.0:
+            bankers_89.append({
                 "market": "Over 1.5 Goals",
                 "confidence": ov_15,
-                "tier": "Safe Banker (≥96%)",
-                "badge": "pill-green",
+                "tier": "Ultra Vault (≥95%)" if ov_15 >= 95.0 else "Continental Banker (≥89%)",
+                "badge": "pill-green" if ov_15 >= 95.0 else "pill-cyan",
                 "odds": round((100.0 / max(1.0, ov_15)) * 1.06, 2),
                 "market_type": "OVER_1_5"
             })
 
-        # Secondary selections for lower tiers
-        if dc_1x >= 90.0 and dc_1x < 96.0:
-            secondary_picks.append({
-                "market": f"{home_name} or Draw (1X)",
-                "confidence": dc_1x,
-                "tier": "Continental Pick",
-                "badge": "pill-cyan",
-                "odds": round((100.0 / max(1.0, dc_1x)) * 1.05, 2),
-                "market_type": "DC_1X"
-            })
-        if ov_15 >= 90.0 and ov_15 < 96.0:
-            secondary_picks.append({
-                "market": "Over 1.5 Goals",
-                "confidence": ov_15,
-                "tier": "Continental Pick",
-                "badge": "pill-cyan",
-                "odds": round((100.0 / max(1.0, ov_15)) * 1.06, 2),
-                "market_type": "OVER_1_5"
+        if ov_25 >= 89.0:
+            bankers_89.append({
+                "market": "Over 2.5 Goals",
+                "confidence": ov_25,
+                "tier": "Ultra Vault (≥95%)" if ov_25 >= 95.0 else "Continental Banker (≥89%)",
+                "badge": "pill-green" if ov_25 >= 95.0 else "pill-cyan",
+                "odds": round((100.0 / max(1.0, ov_25)) * 1.08, 2),
+                "market_type": "OVER_2_5"
             })
 
         best_1x2_team = home_name if probs["1X2"]["Home"] > probs["1X2"]["Away"] else away_name
         best_1x2_prob = max(probs["1X2"]["Home"], probs["1X2"]["Away"])
 
+        bankers_89.sort(key=lambda x: x["confidence"], reverse=True)
+
         primary_rec = (
-            bankers_strict[0] if bankers_strict
-            else secondary_picks[0] if secondary_picks
+            bankers_89[0] if bankers_89
             else {
                 "market": f"{best_1x2_team} Draw No Bet",
                 "confidence": round(best_1x2_prob * 1.25, 1),
@@ -213,7 +202,7 @@ class QuantitativePredictionEngine:
                 "market_type": "DNB"
             }
         )
-        return primary_rec, bankers_strict
+        return primary_rec, bankers_89
 
     @staticmethod
     def check_boom_status(prediction: dict, home_score: int, away_score: int, state: str) -> bool:
@@ -253,7 +242,7 @@ class QuantitativePredictionEngine:
 quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
 
 # =====================================================================
-# 2. ACCUMULATOR BUILDER (TARGET ODDS EXACT SOLVER FOR >= 96% PICKS)
+# 2. ACCUMULATOR BUILDER (TARGET ODDS EXACT SOLVER FOR >= 89% PICKS)
 # =====================================================================
 def build_exact_target_ticket(all_picks: list, target_odds: float):
     selected = []
@@ -497,7 +486,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. FILTERED HIGH-GOAL LEAGUES (FAILED CUPS & LEAGUES DELETED)
+# 4. FILTERED HIGH-GOAL LEAGUES (LOW-SCORING CUPS & SWEDEN STRIPPED)
 # =====================================================================
 ACTIVE_LEAGUES = [
     # Top Elite European Divisions
@@ -666,13 +655,13 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Streaming filtered high-goal leagues & Poisson tensors..."):
+with st.spinner("Processing Poisson tensor distributions (≥89.0% Filter)..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
 
 # =====================================================================
-# 5. HEADER & CONTROLS
+# 5. APP HEADER & CONTROLS
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} MATCHES LIVE NOW</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play Fixtures</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else ''
@@ -685,7 +674,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">Poisson Quantitative Engine</span>
+                <span class="glass-pill pill-cyan">Poisson Engine Active (≥89.0% Filter)</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -703,7 +692,7 @@ render_html(f"""
 tab_feed, tab_live_center, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     f"⚡ Daily Match Board ({len(all_today_games)})", 
     f"🔴 Live Match Center ({len(live_fixtures)})",
-    "🎯 Safe Banker Hub (≥96%)", 
+    "🎯 Safe Banker Hub (≥89%)", 
     "💰 Kelly Bankroll Calculator", 
     "🔬 7x7 Simulation Matrix"
 ])
@@ -774,7 +763,7 @@ def render_quant_grid(match_list):
         </div>
         <div style="text-align: right;">
             <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Certainty</div>
-            <div class="confidence-metric" style="color: {'#30d158' if rec['confidence'] >= 96.0 else '#ffffff'};">{rec['confidence']}%</div>
+            <div class="confidence-metric" style="color: {'#30d158' if rec['confidence'] >= 89.0 else '#ffffff'};">{rec['confidence']}%</div>
         </div>
     </div>
 </div>
@@ -782,41 +771,40 @@ def render_quant_grid(match_list):
     render_html(f'<div class="card-grid-container">{"".join(cards_html)}</div>')
 
 # =====================================================================
-# TAB 1: DAILY MATCH BOARD (GROUPED BY CONFIDENCE TIER)
+# TAB 1: DAILY MATCH BOARD (GROUPED: >=95%, 89-94.9%, <89%)
 # =====================================================================
 with tab_feed:
     tier_95_plus = []
-    tier_90_94 = []
-    tier_below_90 = []
+    tier_89_94 = []
+    tier_below_89 = []
 
     for m in all_today_games:
         conf = m["recommendation"]["confidence"]
         if conf >= 95.0:
             tier_95_plus.append(m)
-        elif conf >= 90.0:
-            tier_90_94.append(m)
+        elif conf >= 89.0:
+            tier_89_94.append(m)
         else:
-            tier_below_90.append(m)
+            tier_below_89.append(m)
 
-    # Sort >=95% games descending so 96% and 97%+ are strictly at the top
     tier_95_plus.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
-    tier_90_94.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
+    tier_89_94.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
-    render_html('<span class="glass-pill pill-green" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">💎 Ultra Vault Tier: 95% & Above (≥96% Placed at Top)</span>')
+    render_html('<span class="glass-pill pill-green" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">💎 Ultra Vault Tier: 95.0% & Above</span>')
     if tier_95_plus:
         render_quant_grid(tier_95_plus)
     else:
         st.info("No fixtures meeting the ultra-high ≥ 95.0% threshold today.")
 
-    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">⚡ Continental Value Tier: 90.0% – 94.9%</span>')
-    if tier_90_94:
-        render_quant_grid(tier_90_94)
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">⚡ Continental Edge Tier: 89.0% – 94.9%</span>')
+    if tier_89_94:
+        render_quant_grid(tier_89_94)
     else:
-        st.info("No fixtures in the 90.0% - 94.9% bracket today.")
+        st.info("No fixtures in the 89.0% - 94.9% bracket today.")
 
-    render_html('<span class="glass-pill pill-gold" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">🔬 Active Market Watch: Remaining Poisson Matchups (&lt; 90%)</span>')
-    if tier_below_90:
-        render_quant_grid(tier_below_90)
+    render_html('<span class="glass-pill pill-gold" style="font-size: 0.85rem; padding: 6px 14px; margin-top: 18px; margin-bottom: 8px;">🔬 Active Market Watch: Residual Matchups (&lt; 89.0%)</span>')
+    if tier_below_89:
+        render_quant_grid(tier_below_89)
 
 # =====================================================================
 # TAB 2: IN-PLAY LIVE MATCH CENTER
@@ -945,7 +933,7 @@ with tab_live_center:
             render_html(probs_card)
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (STRICTLY ≥ 96% ONLY)
+# TAB 3: SAFE BANKER HUB (FILTERED TO ≥ 89.0%)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -954,12 +942,12 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">Banker Isolation (≥96.0% Filter)</span>
+            <span class="glass-pill pill-green">Banker Hub (≥89.0% Filter)</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Hub</h2>
         </div>
     </div>
     <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Every selection in this hub is strictly filtered to ≥ 96.0% certainty. Failed cup and low-scoring leagues have been permanently removed.
+        Selections filtered to a high-certainty ≥ 89.0% baseline with live score & boom verification.
     </p>
     """)
 
@@ -975,12 +963,11 @@ with tab_surebets:
         label_visibility="collapsed"
     )
 
-    # Gather strictly qualified >=96% bankers only
-    all_bankers_96 = []
+    all_bankers_89 = []
     for g in all_today_games:
         for b in g["bankers"]:
-            if b["confidence"] >= 96.0:
-                all_bankers_96.append({
+            if b["confidence"] >= 89.0:
+                all_bankers_89.append({
                     "match": g["match"],
                     "home": g["home"],
                     "away": g["away"],
@@ -1000,19 +987,19 @@ with tab_surebets:
                     "odds": b["odds"]
                 })
 
-    all_bankers_96.sort(key=lambda x: x["confidence"], reverse=True)
+    all_bankers_89.sort(key=lambda x: x["confidence"], reverse=True)
 
     if "3-Banker" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_96, 3.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 3.00)
         slip_label = "3.00 Odds Safe Banker"
     elif "5-Banker" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_96, 5.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 5.00)
         slip_label = "5.00 Odds Multi Slip"
     elif "10-Odds" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_96, 10.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 10.00)
         slip_label = "10.00 Odds Monster Slip"
     else:
-        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_96, 20.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_bankers_89, 20.00)
         slip_label = "20.00 Odds Master Ticket"
 
     c_left, c_right = st.columns([2, 1])
@@ -1061,7 +1048,7 @@ with tab_surebets:
 """)
             render_html("".join(cards))
         else:
-            st.info("No fixtures meeting the strict ≥ 96.0% Banker criteria today.")
+            st.info("No fixtures meeting the ≥ 89.0% Banker criteria today.")
 
     with c_right:
         if selected_slip:
@@ -1073,7 +1060,7 @@ with tab_surebets:
 <div class="liquid-glass-card" style="border-color: rgba(82, 229, 231, 0.45);">
 <span class="glass-pill pill-cyan">{slip_label}</span>
 <h3 style="margin: 12px 0 2px 0;">Accumulator Summary</h3>
-<p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Compounded strictly from independent Poisson picks $\ge 96.0\%$.</p>
+<p style="font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-bottom: 12px;">Compounded strictly from independent Poisson picks $\ge 89.0\%$.</p>
 <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.08); margin: 10px 0;">
 <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
 <span style="font-size: 0.88rem; color: rgba(255,255,255,0.7);">Total Odds:</span>
@@ -1088,7 +1075,7 @@ with tab_surebets:
 <span style="font-size: 1.45rem; font-weight: 800; color: #30d158;">{round(joint_prob, 1)}%</span>
 </div>
 <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px; font-size: 0.78rem; line-height: 1.4;">
-🛡️ <b>Strict Banker Quality:</b> Zero games below 96.0% are accepted into this ticket builder.
+🛡️ <b>Banker Standard:</b> Zero games below 89.0% certainty are accepted into this ticket builder.
 </div>
 </div>
 """)
