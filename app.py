@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from requests.adapters import HTTPAdapter
 import math
-import hashlib
+import urllib.parse
 import numpy as np
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +14,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Strips whitespace indentation to prevent Streamlit from turning HTML into code blocks
 def render_html(html_str: str):
     cleaned = "\n".join(line.strip() for line in html_str.strip().splitlines() if line.strip())
     st.markdown(cleaned, unsafe_allow_html=True)
@@ -28,7 +27,7 @@ def get_http_session() -> requests.Session:
     session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     return session
 
-# Live storage for SportyBet Nigeria booking codes
+# Live storage for SportyBet Nigeria verified codes
 if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
         "3_odds": "",
@@ -38,54 +37,7 @@ if "sportybet_ng_codes" not in st.session_state:
     }
 
 # =====================================================================
-# 1. SPORTYBET NIGERIA BOOKING CODE DISPATCHER
-# =====================================================================
-class SportyBetNigeriaEngine:
-    @staticmethod
-    def get_or_create_ng_code(selected_slip: list, key_name: str) -> str:
-        # 1. Check if user manually saved an official code for this slip
-        saved = st.session_state.sportybet_ng_codes.get(key_name, "").strip()
-        if saved:
-            return saved
-
-        # 2. Try reaching SportyBet Nigeria share endpoint
-        if selected_slip:
-            try:
-                session = get_http_session()
-                payload = {
-                    "source": "mobile",
-                    "outcomes": [
-                        {
-                            "eventId": s.get("event_id", ""),
-                            "marketId": s.get("market_type", ""),
-                            "specifier": None
-                        }
-                        for s in selected_slip
-                    ]
-                }
-                headers = {
-                    "Content-Type": "application/json",
-                    "Referer": "https://www.sportybet.com/ng/",
-                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
-                }
-                resp = session.post("https://www.sportybet.com/api/ng/orders/share", json=payload, headers=headers, timeout=2.0)
-                if resp.status_code == 200:
-                    code = resp.json().get("data", {}).get("shareCode", "")
-                    if code:
-                        st.session_state.sportybet_ng_codes[key_name] = code
-                        return code
-            except Exception:
-                pass
-
-            # 3. Deterministic code generated from match IDs (never returns 'PENDING')
-            raw_hash_seed = f"{date.today()}-{key_name}-" + "-".join([s.get("match", "") for s in selected_slip])
-            deterministic_code = hashlib.md5(raw_hash_seed.encode()).hexdigest()[:6].upper()
-            return deterministic_code
-
-        return "N/A"
-
-# =====================================================================
-# 2. QUANTITATIVE PREDICTION & KELLY ENGINE
+# 1. QUANTITATIVE PREDICTION & CORNER ENGINE (4 MARKETS ONLY)
 # =====================================================================
 class QuantitativePredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -316,7 +268,6 @@ class QuantitativePredictionEngine:
                 return True
         return False
 
-    # FIX FOR ATTRIBUTE ERROR: Declared as static method
     @staticmethod
     def calculate_kelly(bankroll: float, model_prob: float, bookmaker_odds: float, fraction: float = 0.25):
         if bookmaker_odds <= 1.0 or model_prob <= 0:
@@ -341,6 +292,10 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     for m in all_matches:
         for c in m["candidates"]:
             if c["confidence"] >= 62.0:
+                # Direct SportyBet search URL for this match
+                search_query = urllib.parse.quote(f"{m['home']} {m['away']}")
+                sporty_url = f"https://www.sportybet.com/ng/sport/football/search?keyword={search_query}"
+                
                 all_picks.append({
                     "event_id": m.get("event_id", ""),
                     "match": m["match"],
@@ -361,7 +316,8 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
                     "market_type": c["market_type"],
                     "category": c["category"],
                     "confidence": c["confidence"],
-                    "odds": c["odds"]
+                    "odds": c["odds"],
+                    "sporty_url": sporty_url
                 })
 
     all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
@@ -392,7 +348,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 3. GPU LIQUID GLASS STYLES & SPORTYBET NIGERIA ROW
+# 2. GPU LIQUID GLASS STYLES
 # =====================================================================
 render_html("""
 <style>
@@ -457,7 +413,6 @@ render_html("""
         min-width: 58px;
     }
 
-    /* MATCHED SPORTYBET NIGERIA CODE POD */
     .sportybet-code-container {
         background: #0d121d;
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -534,7 +489,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. ACTIVE LEAGUES PIPELINE
+# 3. HIGH-YIELD LEAGUES PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -698,13 +653,13 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Synchronizing SportyBet Nigeria odds & Poisson simulations..."):
+with st.spinner("Processing daily fixtures & calculating exact-odds slips..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
 
 # =====================================================================
-# 5. HEADER
+# 4. APP HEADER
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} LIVE</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS</span>' if boom_fixtures else ''
@@ -717,7 +672,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">SportyBet Nigeria Dedicated</span>
+                <span class="glass-pill pill-cyan">SportyBet Nigeria Direct Integration</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -943,7 +898,7 @@ with tab_live_center:
             render_html(probs_card)
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (SPORTYBET NIGERIA ONLY)
+# TAB 3: SAFE BANKER HUB (WITH DIRECT FAST-SEARCH SPORTYBET BRIDGE)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -987,8 +942,8 @@ with tab_surebets:
         slip_label = "Safe 20 Odds #1"
         key_name = "20_odds"
 
-    # Get SportyBet Nigeria booking code (Never returns PENDING)
-    code_ng = SportyBetNigeriaEngine.get_or_create_ng_code(selected_slip, key_name=key_name)
+    # Active code for this ticket
+    active_code = st.session_state.sportybet_ng_codes.get(key_name, "").strip()
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
     slip_items_html = []
@@ -999,16 +954,31 @@ with tab_surebets:
                 <div style="font-weight: 700; font-size: 0.98rem; color: #ffffff;">{s['home']} vs {s['away']}</div>
                 <div style="font-size: 0.78rem; color: rgba(255,255,255,0.45);">{s['league']} • {s['time']}</div>
             </div>
-            <div style="text-align: right;">
-                <span style="font-size: 0.78rem; color: rgba(255,255,255,0.5); margin-right: 8px;">{s['category']}</span>
-                <span style="font-weight: 800; color: #ffffff; font-size: 0.95rem; margin-right: 8px;">{s['sporty_market']}</span>
-                <span style="font-weight: 800; color: #ffd60a; font-size: 0.95rem; margin-right: 8px;">{s['odds']}</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 0.78rem; color: rgba(255,255,255,0.5);">{s['category']}</span>
+                <span style="font-weight: 800; color: #ffffff; font-size: 0.95rem;">{s['sporty_market']}</span>
+                <span style="font-weight: 800; color: #ffd60a; font-size: 0.95rem;">{s['odds']}</span>
                 <span style="font-size: 0.8rem; color: rgba(255,255,255,0.4);">{int(s['confidence'])}%</span>
+                <a href="{s['sporty_url']}" target="_blank" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; padding: 3px 8px; color: #52e5e7; text-decoration: none; font-size: 0.72rem; font-weight: 700;">
+                    🔎 Find on SportyBet
+                </a>
             </div>
         </div>
         """)
 
-    # Render card modeled after the user's reference screenshot
+    # SportyBet code chip display
+    code_chip_markup = f"""
+    <div class="sporty-code-chip">
+        <span>Sportybet ng:</span>
+        <span class="sporty-code-bold">{active_code}</span>
+    </div>
+    """ if active_code else f"""
+    <div class="sporty-code-chip" style="border-color: rgba(255,214,10,0.3); background: rgba(255,214,10,0.06);">
+        <span style="color: #ffd60a;">Ready to Book</span>
+    </div>
+    """
+
+    # Render card
     render_html(f"""
     <div style="background: #0a0f18; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 14px; margin-bottom: 6px;">
@@ -1032,34 +1002,41 @@ with tab_surebets:
         <div class="sportybet-code-container">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 0.78rem; font-weight: 800; color: rgba(255,255,255,0.45); text-transform: uppercase;">CODE:</span>
-                <div class="sporty-code-chip">
-                    <span>Sportybet ng:</span>
-                    <span class="sporty-code-bold">{code_ng}</span>
-                </div>
+                {code_chip_markup}
             </div>
-            <div>
-                <a href="https://www.sportybet.com/ng/" target="_blank" style="background: #e91e63; color: #fff; text-decoration: none; padding: 7px 18px; border-radius: 9999px; font-size: 0.82rem; font-weight: 800; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.4);">
-                    ⚡ Load on SportyBet Nigeria
+            <div style="display: flex; gap: 8px;">
+                <a href="https://www.sportybet.com/ng/" target="_blank" style="background: #e91e63; color: #fff; text-decoration: none; padding: 8px 18px; border-radius: 9999px; font-size: 0.82rem; font-weight: 800; box-shadow: 0 4px 12px rgba(233, 30, 99, 0.4);">
+                    ⚡ Open SportyBet Nigeria
                 </a>
             </div>
         </div>
     </div>
     """)
 
-    # Community Code update drawer for SportyBet Nigeria
-    with st.expander(f"📝 Update Official SportyBet Nigeria Code for {slip_label}"):
-        entered_code = st.text_input(
-            "Enter Sportybet Nigeria Code (saves instantly):", 
-            value=st.session_state.sportybet_ng_codes[key_name], 
-            key=f"ng_input_{key_name}", 
-            placeholder="e.g. VFUBGJ"
-        )
-        if entered_code != st.session_state.sportybet_ng_codes[key_name]:
-            st.session_state.sportybet_ng_codes[key_name] = entered_code.strip().upper()
-            st.rerun()
+    # Fast 1-Click Clipboard text area
+    slip_copy_text = f"--- SportyBet Betslip ({slip_label} • {achieved_odds}x) ---\n" + "\n".join([
+        f"• {s['home']} vs {s['away']} -> {s['sporty_market']} (@{s['odds']})"
+        for s in selected_slip
+    ])
+
+    c_box1, c_box2 = st.columns([1.4, 1])
+    with c_box1:
+        with st.expander(f"📋 1-Click Copy Betslip Text ({len(selected_slip)} Selections)"):
+            st.text_area("SportyBet format:", value=slip_copy_text, height=110)
+    with c_box2:
+        with st.expander(f"💾 Save Official SportyBet Code for {slip_label}"):
+            entered_code = st.text_input(
+                "Enter Sportybet Nigeria Code:", 
+                value=st.session_state.sportybet_ng_codes[key_name], 
+                key=f"ng_code_{key_name}", 
+                placeholder="e.g. BC489A"
+            )
+            if entered_code != st.session_state.sportybet_ng_codes[key_name]:
+                st.session_state.sportybet_ng_codes[key_name] = entered_code.strip().upper()
+                st.rerun()
 
 # =====================================================================
-# TAB 4: FRACTIONAL KELLY STAKING CALCULATOR (FIXED)
+# TAB 4: FRACTIONAL KELLY STAKING CALCULATOR
 # =====================================================================
 with tab_kelly:
     render_html("""
