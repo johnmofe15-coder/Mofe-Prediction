@@ -23,14 +23,14 @@ def get_http_session() -> requests.Session:
     session = requests.Session()
     adapter = HTTPAdapter(pool_connections=65, pool_maxsize=65, max_retries=2)
     session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
-        "Accept": "application/json, text/plain, */*"
-    })
-    return session
+   if "sportybet_ng_codes" not in st.session_state:
+    st.session_state.sportybet_ng_codes = {
+        "3_odds": "VFUBGJ",
+        "5_odds": "C5JEQK",
+        "10_odds": "B2WCRA",
+        "20_odds": "KFG5BM"
+    }
 
-if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
         "3_odds": "VFUBGJ",
         "5_odds": "C5JEQK",
