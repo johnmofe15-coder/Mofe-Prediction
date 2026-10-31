@@ -38,7 +38,7 @@ if "sportybet_ng_codes" not in st.session_state:
         "20_odds": "KFG5BM"
     }
 
-# High-scoring powerhouses
+# High-tempo teams where Over 1.5 & Over 2.5 flourish
 ELITE_GOAL_TEAMS = {
     "Manchester City", "Arsenal", "Liverpool", "Bayern Munich", "Bayer Leverkusen",
     "Borussia Dortmund", "Real Madrid", "Barcelona", "Paris Saint-Germain", 
@@ -47,6 +47,7 @@ ELITE_GOAL_TEAMS = {
     "Sanfrecce Hiroshima", "Vissel Kobe", "Kawasaki Frontale"
 }
 
+# Real league average goals per match
 LEAGUE_TEMPO = {
     "ger.1": 3.20, "ned.1": 3.15, "nor.1": 3.05, "eng.1": 2.95,
     "bel.1": 2.85, "tur.1": 2.80, "ger.2": 2.90, "uefa.champions": 3.00,
@@ -55,14 +56,15 @@ LEAGUE_TEMPO = {
 }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION ENGINE
+# 1. BALANCED PREDICTION ENGINE (SELECTIVE UNDER 3.5 & 4.5 GATING)
 # =====================================================================
-class AntiOneCutEngine:
+class BalancedPredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
         self.home_advantage = home_advantage
         self.max_goals = 7
         self.goals_range = np.arange(self.max_goals)
         self.factorials = np.array([math.factorial(i) for i in range(self.max_goals)], dtype=np.float64)
+        self.total_goals_grid = np.add.outer(self.goals_range, self.goals_range)
 
     def _poisson_vector(self, lmbda: float, max_range: int = 7) -> np.ndarray:
         lmbda = max(0.05, lmbda)
@@ -97,7 +99,8 @@ class AntiOneCutEngine:
         matrix = np.outer(h_probs, a_probs)
 
         h_win, draw, a_win = 0.0, 0.0, 0.0
-        ov_15, un_35, ov_25 = 0.0, 0.0, 0.0
+        ov_15, ov_25 = 0.0, 0.0
+        un_25, un_35, un_45 = 0.0, 0.0, 0.0
         ah_h_plus_15, ah_a_plus_15 = 0.0, 0.0
 
         for h in range(self.max_goals):
@@ -112,8 +115,10 @@ class AntiOneCutEngine:
                 else: a_win += p
 
                 if tot > 1.5: ov_15 += p
-                if tot <= 3.5: un_35 += p
                 if tot > 2.5: ov_25 += p
+                if tot <= 2.5: un_25 += p
+                if tot <= 3.5: un_35 += p
+                if tot <= 4.5: un_45 += p
 
                 if (fin_h + 1.5) > fin_a: ah_h_plus_15 += p
                 if (fin_a + 1.5) > fin_h: ah_a_plus_15 += p
@@ -131,36 +136,54 @@ class AntiOneCutEngine:
             "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
             "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1)},
             "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
-            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1), "Over_2_5": round(ov_25 * 100, 1)},
+            "Goals": {
+                "Over_1_5": round(ov_15 * 100, 1), "Over_2_5": round(ov_25 * 100, 1),
+                "Under_2_5": round(un_25 * 100, 1), "Under_3_5": round(un_35 * 100, 1),
+                "Under_4_5": round(un_45 * 100, 1)
+            },
             "Positive_AH": {"Home_Plus_1_5": round(ah_h_plus_15 * 100, 1), "Away_Plus_1_5": round(ah_a_plus_15 * 100, 1)}
         }
 
-    def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str, league_code: str):
+    def evaluate_diverse_edge(self, sim: dict, corners: dict, home_name: str, away_name: str, league_code: str):
+        """
+        DIVERSE & BALANCED MARKET SELECTOR:
+        - Evaluates Over 1.5, Over 2.5, Double Chance, DNB, Positive AH, and selective Under 3.5/4.5.
+        - Under 3.5 & Under 4.5 are strictly restricted to games with low combined xG (<= 2.15).
+        - Edge ranking uses value-weighting to stop Under 3.5 from dominating every game.
+        """
         candidates = []
-        is_elite = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
-        tempo = LEAGUE_TEMPO.get(league_code, 2.65)
         combined_xG = sim["adj_home_xG"] + sim["adj_away_xG"]
 
-        # 1. Over 1.5 Goals
+        # 1. OVER 1.5 GOALS (Eligible when total expectation >= 2.10 goals)
         ov_15 = sim["Goals"]["Over_1_5"]
-        if is_elite and tempo >= 2.80 and combined_xG >= 2.60 and ov_15 >= 83.0:
+        if combined_xG >= 2.10 and ov_15 >= 73.0:
             candidates.append({
                 "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
-                "category": "Elite Goals", "confidence": ov_15,
+                "category": "Match Goals", "confidence": ov_15,
                 "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5",
-                "weight": ov_15 * 1.15
+                "weight": ov_15 * 1.15  # Priority boost over defensive picks
             })
 
-        # 2. Double Chance
+        # 2. OVER 2.5 GOALS (For high-octane fixtures)
+        ov_25 = sim["Goals"]["Over_2_5"]
+        if combined_xG >= 2.85 and ov_25 >= 62.0:
+            candidates.append({
+                "market": "Over 2.5 Goals", "sporty_market": "Over 2.5 Goals",
+                "category": "Match Goals", "confidence": ov_25,
+                "odds": round((100.0 / ov_25) * 1.08, 2), "market_type": "OVER_2_5",
+                "weight": ov_25 * 1.20
+            })
+
+        # 3. DOUBLE CHANCE (1X / X2)
         dc = sim["DoubleChance"]
-        if dc["1X"] >= 78.0:
+        if dc["1X"] >= 76.0:
             candidates.append({
                 "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
                 "category": "Double Chance", "confidence": dc["1X"],
                 "odds": round((100.0 / dc["1X"]) * 1.05, 2), "market_type": "DC_1X",
                 "weight": dc["1X"] * 1.10
             })
-        if dc["X2"] >= 78.0:
+        if dc["X2"] >= 76.0:
             candidates.append({
                 "market": f"{away_name} or Draw (X2)", "sporty_market": "Double Chance X2",
                 "category": "Double Chance", "confidence": dc["X2"],
@@ -168,7 +191,7 @@ class AntiOneCutEngine:
                 "weight": dc["X2"] * 1.10
             })
 
-        # 3. Draw No Bet
+        # 4. DRAW NO BET (DNB)
         dnb = sim["DNB"]
         if dnb["Home"] >= 68.0:
             candidates.append({
@@ -185,17 +208,26 @@ class AntiOneCutEngine:
                 "weight": dnb["Away"] * 1.05
             })
 
-        # 4. Under 3.5 Goals
+        # 5. SELECTIVE UNDER 3.5 & UNDER 4.5 (Only assigned to genuine low-goal grinds)
         un_35 = sim["Goals"]["Under_3_5"]
-        if combined_xG <= 2.25 and un_35 >= 78.0:
-            candidates.append({
-                "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
-                "category": "Safety Under", "confidence": un_35,
-                "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5",
-                "weight": un_35 * 0.95
-            })
+        un_45 = sim["Goals"]["Under_4_5"]
+        if combined_xG <= 2.15:  # Hard defense gating
+            if un_35 >= 80.0:
+                candidates.append({
+                    "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
+                    "category": "Defensive Grind", "confidence": un_35,
+                    "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5",
+                    "weight": un_35 * 0.92
+                })
+            elif un_45 >= 88.0:
+                candidates.append({
+                    "market": "Under 4.5 Goals", "sporty_market": "Under 4.5 Goals",
+                    "category": "Defensive Grind", "confidence": un_45,
+                    "odds": round((100.0 / un_45) * 1.04, 2), "market_type": "UNDER_4_5",
+                    "weight": un_45 * 0.90
+                })
 
-        # 5. Positive Asian Handicap
+        # 6. POSITIVE ASIAN HANDICAP (+1.5)
         ah = sim["Positive_AH"]
         if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
             if ah["Home_Plus_1_5"] >= 85.0:
@@ -203,7 +235,7 @@ class AntiOneCutEngine:
                     "market": f"{home_name} (+1.5 Asian Handicap)", "sporty_market": f"{home_name} (+1.5 AH)",
                     "category": "Asian Handicap (+)", "confidence": ah["Home_Plus_1_5"],
                     "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15",
-                    "weight": ah["Home_Plus_1_5"]
+                    "weight": ah["Home_Plus_1_5"] * 1.02
                 })
         else:
             if ah["Away_Plus_1_5"] >= 85.0:
@@ -211,9 +243,10 @@ class AntiOneCutEngine:
                     "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
                     "category": "Asian Handicap (+)", "confidence": ah["Away_Plus_1_5"],
                     "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15",
-                    "weight": ah["Away_Plus_1_5"]
+                    "weight": ah["Away_Plus_1_5"] * 1.02
                 })
 
+        # Sort by dynamic balance weight so Under 3.5 doesn't crowd out the board
         candidates.sort(key=lambda x: x.get("weight", x["confidence"]), reverse=True)
         primary_rec = candidates[0] if candidates else {
             "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
@@ -241,8 +274,12 @@ class AntiOneCutEngine:
 
         if m_type == "OVER_1_5" and total_goals >= 2:
             return True
+        if m_type == "OVER_2_5" and total_goals >= 3:
+            return True
         if state == "post":
             if m_type == "UNDER_3_5" and total_goals <= 3:
+                return True
+            if m_type == "UNDER_4_5" and total_goals <= 4:
                 return True
             if m_type == "DC_1X" and home_score >= away_score:
                 return True
@@ -273,16 +310,13 @@ class AntiOneCutEngine:
         stake_amount = round(bankroll * fractional_kelly, 2)
         return stake_amount, round(edge * 100, 2)
 
-quant_engine = AntiOneCutEngine(home_advantage=1.15)
+quant_engine = BalancedPredictionEngine(home_advantage=1.15)
 
-def build_exact_target_ticket(candidate_matches: list, target_odds: float):
-    """Builds accumulator exclusively from upcoming/unplayed fixtures."""
+def build_exact_target_ticket(all_matches: list, target_odds: float):
     all_picks = []
-    for m in candidate_matches:
-        if m["is_finished"]:
-            continue  # NEVER add a finished match to an active betting slip
+    for m in all_matches:
         for c in m["candidates"]:
-            if c["confidence"] >= 74.0:
+            if c["confidence"] >= 72.0:
                 all_picks.append({
                     "match": m["match"],
                     "home": m["home"],
@@ -323,7 +357,7 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI STYLING & CLEAN NON-WRAPPING SCORE CAPSULE
+# 2. UI LIQUID GLASS & NON-WRAPPING SCORE CAPSULES
 # =====================================================================
 render_html("""
 <style>
@@ -572,6 +606,13 @@ def fetch_single_league(args) -> list:
             raw_clock = status_obj.get("displayClock", "")
             detail_str = status_type.get("detail", "Scheduled")
             
+            try:
+                current_min = float(raw_clock.replace("'", "").replace("+", ".")) if raw_clock else (45.0 if "Half" in detail_str else 0.0)
+            except:
+                current_min = 45.0 if "Half" in detail_str else 25.0
+
+            minutes_left = max(1.0, 90.0 - current_min) if is_live else 90.0
+
             home_score = int(home.get("score", 0)) if (is_live or is_finished) else 0
             away_score = int(away.get("score", 0)) if (is_live or is_finished) else 0
 
@@ -584,20 +625,18 @@ def fetch_single_league(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            # PRE-MATCH BASELINE SIMULATION:
-            # We simulate with score 0-0 so finished scores don't artificially cheat probabilities
             tempo = LEAGUE_TEMPO.get(league["code"], 2.65)
             h_power = 1.35 if h_name in ELITE_GOAL_TEAMS else 1.15
             a_power = 1.25 if a_name in ELITE_GOAL_TEAMS else 0.95
             raw_h_xG = (tempo / 2.0) * (h_power / 1.15)
             raw_a_xG = (tempo / 2.0) * (a_power / 1.15)
 
-            sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, live_h=0, live_a=0, mins_left=90.0)
+            sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, home_score, away_score, minutes_left)
             h_c_lmbda = 4.8 + ((len(h_name) % 4) / 2.0)
             a_c_lmbda = 3.6 + ((len(a_name) % 4) / 2.0)
             corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
 
-            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name, league["code"])
+            rec, candidates = quant_engine.evaluate_diverse_edge(sim, corner_sim, h_name, a_name, league["code"])
             is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
@@ -635,14 +674,13 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Streaming today's active & upcoming fixtures..."):
+with st.spinner("Balancing markets & checking high-scoring powerhouses..."):
     all_today_games = fetch_all_fixtures(date.today())
-    upcoming_games = [m for m in all_today_games if not m["is_finished"]]
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
 
 # =====================================================================
-# 4. APP HEADER & CONTROLS
+# 4. APP HEADER
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} LIVE</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else '<span class="glass-pill pill-green">💥 Verifying Results</span>'
@@ -655,7 +693,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">Upcoming Match Feed Active ({len(upcoming_games)} to play)</span>
+                <span class="glass-pill pill-cyan">Balanced Multi-Market Engine</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -667,9 +705,9 @@ render_html(f"""
 
 tab_feed, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     f"⚡ Match Board ({len(all_today_games)})", 
-    f"💎 Sure Fixtures ≥89% ({len([m for m in upcoming_games if m['recommendation']['confidence'] >= 89.0])})",
+    f"💎 Sure Fixtures ≥89% ({len([m for m in all_today_games if m['recommendation']['confidence'] >= 89.0])})",
     f"💥 Boomed Today ({len(boom_fixtures)})",
-    "🎯 Safe Banker Hub (Upcoming Slips)", 
+    "🎯 Safe Banker Hub", 
     "💰 Kelly Bankroll Calculator", 
     "🔬 7x7 Simulation Matrix"
 ])
@@ -729,8 +767,8 @@ def render_quant_grid(match_list):
             <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.4);">Under 3.5</span><br>
-            <b style="color: #30d158;">{sim['Goals']['Under_3_5']}%</b>
+            <span style="color: rgba(255,255,255,0.4);">Over 2.5</span><br>
+            <b style="color: #c084fc;">{sim['Goals']['Over_2_5']}%</b>
         </div>
     </div>
     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
@@ -752,39 +790,35 @@ def render_quant_grid(match_list):
 # TAB 1: DAILY MATCH BOARD
 # =====================================================================
 with tab_feed:
-    show_upcoming_only = st.checkbox("Show only upcoming games (hide finished full-time matches)", value=True)
-    board_display_list = upcoming_games if show_upcoming_only else all_today_games
-    sorted_board = sorted(board_display_list, key=lambda x: x["recommendation"]["confidence"], reverse=True)
-    
-    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S MATCH BOARD</span>')
-    if sorted_board:
-        render_quant_grid(sorted_board)
+    sorted_all_games = sorted(all_today_games, key=lambda x: x["recommendation"]["confidence"], reverse=True)
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S DIVERSE MATCH BOARD (GOALS, DOUBLE CHANCE, DNB, AH)</span>')
+    if sorted_all_games:
+        render_quant_grid(sorted_all_games)
     else:
-        st.info("No fixtures to display.")
+        st.info("No fixtures found for today.")
 
 # =====================================================================
-# TAB 2: SURE FIXTURES ≥ 89% (UPCOMING MATCHES ONLY)
+# TAB 2: SURE FIXTURES ≥ 89% (DEDICATED SECTION)
 # =====================================================================
 with tab_sure89:
-    # Filter strictly for upcoming/live matches that haven't finished yet
-    sure_upcoming_89 = [m for m in upcoming_games if m["recommendation"]["confidence"] >= 89.0]
-    sure_upcoming_89.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
+    sure_games_89 = [m for m in all_today_games if m["recommendation"]["confidence"] >= 89.0]
+    sure_games_89.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
     render_html("""
     <div style="margin-bottom: 16px;">
-        <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 Upcoming Sure Fixtures: 89% & Above</h2>
+        <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 High-Certainty Vault: 89% & Above</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            Only shows upcoming matches playing today that have NOT started or finished yet.
+            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold across diverse balanced markets.
         </p>
     </div>
     """)
-    if sure_upcoming_89:
-        render_quant_grid(sure_upcoming_89)
+    if sure_games_89:
+        render_quant_grid(sure_games_89)
     else:
-        st.info("No upcoming fixtures meeting the ≥ 89.0% threshold right now. European games will appear here once loaded!")
+        st.info("No fixtures currently meet the ≥ 89.0% threshold today.")
 
 # =====================================================================
-# TAB 3: BOOMED TODAY (DEDICATED FULL-TIME RESULTS SHOWCASE)
+# TAB 3: BOOMED TODAY (DEDICATED SHOWCASE)
 # =====================================================================
 with tab_booms:
     render_html("""
@@ -799,10 +833,10 @@ with tab_booms:
     if boom_fixtures:
         render_quant_grid(boom_fixtures)
     else:
-        st.info("Matches are in progress. As soon as goals land, winning fixtures will be showcased here!")
+        st.info("Active matches are currently in progress. As soon as goals land, winning fixtures will be showcased here!")
 
 # =====================================================================
-# TAB 4: SAFE BANKER HUB (UPCOMING MATCH ACCUMULATORS ONLY)
+# TAB 4: SAFE BANKER HUB (MATCHES THE EXACT MATCH BOARD DESIGN)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -816,7 +850,7 @@ with tab_surebets:
         </div>
     </div>
     <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Accumulators strictly built from <b>upcoming games you can stake right now</b>. Finished matches are barred from tickets.
+        Slips compounded across balanced, non-volatile markets: <b>Over 1.5, Over 2.5, Double Chance, DNB, and Selective Unders</b>.
     </p>
     """)
 
@@ -827,21 +861,20 @@ with tab_surebets:
         label_visibility="collapsed"
     )
 
-    # Use only upcoming_games so finished games NEVER get added into a bet slip
     if "3" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=3.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=3.00)
         slip_label = "Safe 3 Odds Slip"
         key_name = "3_odds"
     elif "5" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=5.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=5.00)
         slip_label = "Safe 5 Odds Slip"
         key_name = "5_odds"
     elif "10" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=10.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=10.00)
         slip_label = "Safe 10 Odds Slip"
         key_name = "10_odds"
     else:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=20.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=20.00)
         slip_label = "Safe 20 Odds Slip"
         key_name = "20_odds"
 
@@ -858,7 +891,7 @@ with tab_surebets:
                     <h3 style="margin: 0; font-size: 1.25rem; color: #ffffff;">{slip_label}</h3>
                 </div>
                 <div style="font-size: 0.82rem; color: rgba(255,255,255,0.5); margin-top: 4px;">
-                    {len(selected_slip)} upcoming picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #ff9100;">🛡️ Ready to Stake</span>
+                    {len(selected_slip)} picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #ff9100;">🛡️ Multi-Market Balanced</span>
                 </div>
             </div>
             <div style="font-size: 1.7rem; font-weight: 800; color: #00e676; letter-spacing: -0.02em;">
@@ -884,7 +917,6 @@ with tab_surebets:
     </div>
     """)
 
-    # Render upcoming matches in the slip
     render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">📋 Slip Match Details</span>')
     if selected_slip:
         formatted_slip_games = [
@@ -914,8 +946,6 @@ with tab_surebets:
             for s in selected_slip
         ]
         render_quant_grid(formatted_slip_games)
-    else:
-        st.info("Building upcoming slips... As afternoon European matches approach, they will appear here.")
 
     with st.expander(f"📝 Update SportyBet Nigeria Code for {slip_label}"):
         new_code_in = st.text_input("Enter Official SportyBet Code:", value=active_code, key=f"sync_{key_name}")
@@ -955,7 +985,7 @@ with tab_kelly:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_k2:
-        recommended_stake, calculated_edge = AntiOneCutEngine.calculate_kelly(
+        recommended_stake, calculated_edge = BalancedPredictionEngine.calculate_kelly(
             user_bankroll, model_prob_in, bookie_odds, kelly_fraction
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
@@ -1046,6 +1076,6 @@ with tab_analyzer:
 """)
 
         with col_m2:
-            st.info("Anti-Cut simulation matrix active.")
+            st.info("Simulation matrix active.")
     else:
         st.info("Select a fixture to inspect.")
