@@ -271,7 +271,7 @@ lmbda = max(0.05, lmbda)
 k_range = np.arange(max_range)
 k_fact = np.array([math.factorial(i) for i in range(max_range)], dtype=np.float64)
 return (np.exp(-lmbda) * (lmbda ** k_range)) / k_fact
-def simulate_corners((self, h_lmbda: float, a_lmbda: float) -> dict:
+def simulate_corners(self, h_lmbda: float, a_lmbda: float) -> dict:
 max_c = 18
 h_prob = self._poisson_vector(h_lmbda, max_c)
 a_prob = self._poisson_vector(a_lmbda, max_c)
@@ -621,7 +621,6 @@ cards_html = []
 for m in match_list:
 sim = m["simulation"]
 rec = m["recommendation"]
-c_data = m["corners"]
 if m["is_live"]:
 status_badge = f'● {m["clock"]}'
 elif m["is_finished"]:
