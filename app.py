@@ -39,14 +39,6 @@ if "sportybet_ng_codes" not in st.session_state:
         "20_odds": "KFG5BM"
     }
 
-ELITE_GOAL_TEAMS = {
-    "Manchester City", "Arsenal", "Liverpool", "Bayern Munich", "Bayer Leverkusen",
-    "Borussia Dortmund", "Real Madrid", "Barcelona", "Paris Saint-Germain", 
-    "Inter Milan", "Atalanta", "Sporting CP", "Benfica", "Galatasaray", 
-    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt",
-    "Sanfrecce Hiroshima", "Vissel Kobe", "Kawasaki Frontale"
-}
-
 LEAGUE_TEMPO = {
     "ger.1": 3.20, "ned.1": 3.15, "nor.1": 3.05, "eng.1": 2.95,
     "bel.1": 2.85, "tur.1": 2.80, "ger.2": 2.90, "uefa.champions": 3.00,
@@ -55,9 +47,9 @@ LEAGUE_TEMPO = {
 }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION ENGINE (ANTI-1-CUT PROTECTED)
+# 1. QUANTITATIVE PREDICTION ENGINE (LOCKED TO 3 MARKETS ONLY)
 # =====================================================================
-class AntiOneCutEngine:
+class ExclusiveThreeMarketEngine:
     def __init__(self, home_advantage: float = 1.15):
         self.home_advantage = home_advantage
         self.max_goals = 7
@@ -70,23 +62,6 @@ class AntiOneCutEngine:
         k_fact = np.array([math.factorial(i) for i in range(max_range)], dtype=np.float64)
         return (np.exp(-lmbda) * (lmbda ** k_range)) / k_fact
 
-    def simulate_corners(self, h_lmbda: float, a_lmbda: float) -> dict:
-        max_c = 18
-        h_prob = self._poisson_vector(h_lmbda, max_c)
-        a_prob = self._poisson_vector(a_lmbda, max_c)
-        c_matrix = np.outer(h_prob, a_prob)
-        c_grid = np.add.outer(np.arange(max_c), np.arange(max_c))
-
-        ov_75 = float(c_matrix[c_grid > 7.5].sum())
-        ov_85 = float(c_matrix[c_grid > 8.5].sum())
-        un_115 = float(c_matrix[c_grid <= 11.5].sum())
-        return {
-            "projected_total": round(h_lmbda + a_lmbda, 1),
-            "Over_7_5": round(ov_75 * 100, 1),
-            "Over_8_5": round(ov_85 * 100, 1),
-            "Under_11_5": round(un_115 * 100, 1)
-        }
-
     def simulate_match(self, h_xG: float, a_xG: float, live_h: int = 0, live_a: int = 0, mins_left: float = 90.0) -> dict:
         tf = max(0.05, min(1.0, mins_left / 90.0))
         adj_h = max(0.1, h_xG * self.home_advantage * tf)
@@ -97,9 +72,7 @@ class AntiOneCutEngine:
         matrix = np.outer(h_probs, a_probs)
 
         h_win, draw, a_win = 0.0, 0.0, 0.0
-        ov_05, ov_15, ov_25 = 0.0, 0.0, 0.0
-        un_35 = 0.0
-        ah_h_plus_15, ah_a_plus_15 = 0.0, 0.0
+        ov_05, ov_15 = 0.0, 0.0
 
         for h in range(self.max_goals):
             for a in range(self.max_goals):
@@ -114,130 +87,91 @@ class AntiOneCutEngine:
 
                 if tot > 0.5: ov_05 += p
                 if tot > 1.5: ov_15 += p
-                if tot > 2.5: ov_25 += p
-                if tot <= 3.5: un_35 += p
-
-                if (fin_h + 1.5) > fin_a: ah_h_plus_15 += p
-                if (fin_a + 1.5) > fin_h: ah_a_plus_15 += p
 
         dc_1x = h_win + draw
         dc_x2 = a_win + draw
-
-        non_draw = max(0.001, h_win + a_win)
-        dnb_h = h_win / non_draw
-        dnb_a = a_win / non_draw
+        dc_12 = h_win + a_win
 
         return {
             "adj_home_xG": round(adj_h, 2),
             "adj_away_xG": round(adj_a, 2),
             "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
-            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1)},
-            "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
-            "Goals": {"Over_0_5": round(ov_05 * 100, 1), "Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1), "Over_2_5": round(ov_25 * 100, 1)},
-            "Positive_AH": {"Home_Plus_1_5": round(ah_h_plus_15 * 100, 1), "Away_Plus_1_5": round(ah_a_plus_15 * 100, 1)}
+            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1), "12": round(dc_12 * 100, 1)},
+            "Goals": {"Over_0_5": round(ov_05 * 100, 1), "Over_1_5": round(ov_15 * 100, 1)}
         }
 
-    def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str, league_code: str):
+    def evaluate_locked_markets(self, sim: dict, home_name: str, away_name: str):
+        """
+        STRICTLY RESTRICTED TO:
+        1. Double Chance (1X, X2, 12)
+        2. Over 1.5 Goals
+        3. Over 0.5 Goals
+        Uses value-weighting so Over 0.5 does not override higher-yield Double Chance and Over 1.5.
+        """
         candidates = []
-        is_elite = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
-        tempo = LEAGUE_TEMPO.get(league_code, 2.65)
-        combined_xG = sim["adj_home_xG"] + sim["adj_away_xG"]
 
-        # 1. Over 0.5 Match Goals (Ultimate safety baseline)
-        ov_05 = sim["Goals"]["Over_0_5"]
-        if ov_05 >= 91.0:
-            candidates.append({
-                "market": "Over 0.5 Match Goals", "sporty_market": "Over 0.5 Goals",
-                "category": "Over 0.5 Goals", "confidence": ov_05,
-                "odds": round((100.0 / ov_05) * 1.05, 2), "market_type": "OVER_0_5",
-                "weight": ov_05 * 1.25
-            })
-
-        # 2. Over 1.5 Goals (Strictly for elite high-scoring teams)
+        # 1. OVER 1.5 GOALS (Target priority for balance & value)
         ov_15 = sim["Goals"]["Over_1_5"]
-        if is_elite and tempo >= 2.80 and combined_xG >= 2.60 and ov_15 >= 80.0:
+        if ov_15 >= 70.0:
+            odds_15 = round((100.0 / ov_15) * 1.06, 2)
             candidates.append({
                 "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
-                "category": "Elite Goals", "confidence": ov_15,
-                "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5",
-                "weight": ov_15 * 1.15
+                "category": "Over 1.5", "confidence": ov_15,
+                "odds": odds_15, "market_type": "OVER_1_5",
+                "priority_score": (ov_15 / 100.0) * (odds_15 ** 1.8) * 1.35
             })
 
-        # 3. Double Chance (1X / X2)
+        # 2. DOUBLE CHANCE (1X, X2, 12)
         dc = sim["DoubleChance"]
-        if dc["1X"] >= 74.0:
+        if dc["1X"] >= 72.0:
+            odds_1x = round((100.0 / dc["1X"]) * 1.05, 2)
             candidates.append({
                 "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
                 "category": "Double Chance", "confidence": dc["1X"],
-                "odds": round((100.0 / dc["1X"]) * 1.05, 2), "market_type": "DC_1X",
-                "weight": dc["1X"] * 1.10
+                "odds": odds_1x, "market_type": "DC_1X",
+                "priority_score": (dc["1X"] / 100.0) * (odds_1x ** 1.8) * 1.25
             })
-        if dc["X2"] >= 74.0:
+        if dc["X2"] >= 72.0:
+            odds_x2 = round((100.0 / dc["X2"]) * 1.05, 2)
             candidates.append({
                 "market": f"{away_name} or Draw (X2)", "sporty_market": "Double Chance X2",
                 "category": "Double Chance", "confidence": dc["X2"],
-                "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2",
-                "weight": dc["X2"] * 1.10
+                "odds": odds_x2, "market_type": "DC_X2",
+                "priority_score": (dc["X2"] / 100.0) * (odds_x2 ** 1.8) * 1.25
             })
-
-        # 4. Draw No Bet
-        dnb = sim["DNB"]
-        if dnb["Home"] >= 64.0:
+        if dc["12"] >= 76.0:
+            odds_12 = round((100.0 / dc["12"]) * 1.05, 2)
             candidates.append({
-                "market": f"{home_name} (Draw No Bet)", "sporty_market": f"{home_name} DNB",
-                "category": "Draw No Bet", "confidence": dnb["Home"],
-                "odds": round((100.0 / dnb["Home"]) * 1.06, 2), "market_type": "DNB_H",
-                "weight": dnb["Home"] * 1.05
+                "market": "Any Team to Win (12)", "sporty_market": "Double Chance 12",
+                "category": "Double Chance", "confidence": dc["12"],
+                "odds": odds_12, "market_type": "DC_12",
+                "priority_score": (dc["12"] / 100.0) * (odds_12 ** 1.8) * 1.15
             })
-        elif dnb["Away"] >= 64.0:
+
+        # 3. OVER 0.5 GOALS (Acts as ultra-safe anchor, but balanced against over-domination)
+        ov_05 = sim["Goals"]["Over_0_5"]
+        if ov_05 >= 88.0:
+            odds_05 = round((100.0 / ov_05) * 1.05, 2)
             candidates.append({
-                "market": f"{away_name} (Draw No Bet)", "sporty_market": f"{away_name} DNB",
-                "category": "Draw No Bet", "confidence": dnb["Away"],
-                "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A",
-                "weight": dnb["Away"] * 1.05
+                "market": "Over 0.5 Match Goals", "sporty_market": "Over 0.5 Goals",
+                "category": "Over 0.5", "confidence": ov_05,
+                "odds": odds_05, "market_type": "OVER_0_5",
+                "priority_score": (ov_05 / 100.0) * (odds_05 ** 1.1) * 0.95
             })
 
-        # 5. Under 3.5 Goals
-        un_35 = sim["Goals"]["Under_3_5"]
-        if combined_xG <= 2.35 and un_35 >= 75.0:
-            candidates.append({
-                "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
-                "category": "Safety Under", "confidence": un_35,
-                "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5",
-                "weight": un_35 * 0.95
-            })
-
-        # 6. Positive Asian Handicap
-        ah = sim["Positive_AH"]
-        if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
-            if ah["Home_Plus_1_5"] >= 80.0:
-                candidates.append({
-                    "market": f"{home_name} (+1.5 Asian Handicap)", "sporty_market": f"{home_name} (+1.5 AH)",
-                    "category": "Asian Handicap (+)", "confidence": ah["Home_Plus_1_5"],
-                    "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15",
-                    "weight": ah["Home_Plus_1_5"]
-                })
-        else:
-            if ah["Away_Plus_1_5"] >= 80.0:
-                candidates.append({
-                    "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
-                    "category": "Asian Handicap (+)", "confidence": ah["Away_Plus_1_5"],
-                    "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15",
-                    "weight": ah["Away_Plus_1_5"]
-                })
-
-        candidates.sort(key=lambda x: x.get("weight", x["confidence"]), reverse=True)
+        # Sort by value-weighted priority score to provide balanced variety
+        candidates.sort(key=lambda x: x["priority_score"], reverse=True)
         primary_rec = candidates[0] if candidates else {
-            "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
-            "category": "Double Chance", "confidence": 76.0, "odds": 1.25, "market_type": "DC_1X"
+            "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
+            "category": "Over 1.5", "confidence": 75.0, "odds": 1.30, "market_type": "OVER_1_5"
         }
 
         if primary_rec["confidence"] >= 89.0:
             primary_rec["badge"] = "pill-green"
             primary_rec["tier"] = "Ultra Banker (≥89%)"
-        elif primary_rec["confidence"] >= 80.0:
+        elif primary_rec["confidence"] >= 78.0:
             primary_rec["badge"] = "pill-cyan"
-            primary_rec["tier"] = "Solid Edge"
+            primary_rec["tier"] = "Value Edge"
         else:
             primary_rec["badge"] = "pill-gold"
             primary_rec["tier"] = "Quant Pick"
@@ -256,17 +190,11 @@ class AntiOneCutEngine:
         if m_type == "OVER_1_5" and total_goals >= 2:
             return True
         if state == "post":
-            if m_type == "UNDER_3_5" and total_goals <= 3:
-                return True
             if m_type == "DC_1X" and home_score >= away_score:
                 return True
             if m_type == "DC_X2" and away_score >= home_score:
                 return True
-            if m_type == "DNB_H" and home_score > away_score:
-                return True
-            if m_type == "DNB_A" and away_score > home_score:
-                return True
-            if m_type == "AH_PLUS_15":
+            if m_type == "DC_12" and home_score != away_score:
                 return True
         return False
 
@@ -287,10 +215,10 @@ class AntiOneCutEngine:
         stake_amount = round(bankroll * fractional_kelly, 2)
         return stake_amount, round(edge * 100, 2)
 
-quant_engine = AntiOneCutEngine(home_advantage=1.15)
+quant_engine = ExclusiveThreeMarketEngine(home_advantage=1.15)
 
 # =====================================================================
-# 2. EXACT-TARGET ACCUMULATOR SOLVER
+# 2. EXACT-TARGET ACCUMULATOR SOLVER (3 MARKETS ONLY)
 # =====================================================================
 def build_exact_target_ticket(candidate_matches: list, target_odds: float):
     all_picks = []
@@ -298,7 +226,8 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
         if m["is_finished"]:
             continue
         for c in m["candidates"]:
-            if c["confidence"] >= 64.0:
+            # Baseline certainty for the ticket candidates
+            if c["confidence"] >= 68.0:
                 all_picks.append({
                     "match": m["match"],
                     "home": m["home"],
@@ -321,6 +250,7 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
                     "simulation": m["simulation"]
                 })
 
+    # Sort candidates by combined edge and odds to prevent leg-count inflation
     all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
     selected = []
     used_matches = set()
@@ -336,6 +266,7 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
         if current_odds >= target_odds:
             break
 
+    # If exceeding target by more than 35%, prune low-odds picks to keep odds tight to the target
     if current_odds > (target_odds * 1.35) and len(selected) > 3:
         for i in range(len(selected) - 1, -1, -1):
             cand = selected[i]
@@ -348,7 +279,7 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 3. UI STYLING & CLEAN LAYOUT
+# 3. UI LIQUID GLASS STYLES
 # =====================================================================
 render_html("""
 <style>
@@ -538,7 +469,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. ACTIVE LEAGUES PIPELINE (SCOTLAND PERMANENTLY BANNED)
+# 4. ACTIVE LEAGUES PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -609,7 +540,7 @@ def fetch_single_league(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            # League-tempo pre-match expectation
+            # Pre-match baseline odds
             tempo = LEAGUE_TEMPO.get(league["code"], 2.65)
             h_power = 1.35 if h_name in ELITE_GOAL_TEAMS else 1.15
             a_power = 1.25 if a_name in ELITE_GOAL_TEAMS else 0.95
@@ -617,11 +548,7 @@ def fetch_single_league(args) -> list:
             raw_a_xG = (tempo / 2.0) * (a_power / 1.15)
 
             sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, live_h=0, live_a=0, mins_left=90.0)
-            h_c_lmbda = 4.8 + ((len(h_name) % 4) / 2.0)
-            a_c_lmbda = 3.6 + ((len(a_name) % 4) / 2.0)
-            corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
-
-            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name, league["code"])
+            rec, candidates = quant_engine.evaluate_locked_markets(sim, h_name, a_name)
             is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
@@ -659,14 +586,14 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Compounding anti-1-cut multi-market odds..."):
+with st.spinner("Locking selections to Double Chance, Over 1.5 & Over 0.5..."):
     all_today_games = fetch_all_fixtures(date.today())
     upcoming_games = [m for m in all_today_games if not m["is_finished"]]
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
 
 # =====================================================================
-# 4. APP HEADER & CONTROLS
+# 5. APP HEADER & CONTROLS
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} LIVE</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else '<span class="glass-pill pill-green">💥 Verifying Results</span>'
@@ -679,7 +606,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">Exact Target Odds Engine Active ({len(upcoming_games)} upcoming)</span>
+                <span class="glass-pill pill-cyan">Locked Markets: Double Chance • Over 1.5 • Over 0.5</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -754,8 +681,8 @@ def render_quant_grid(match_list):
             <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.4);">Under 3.5</span><br>
-            <b style="color: #30d158;">{sim['Goals']['Under_3_5']}%</b>
+            <span style="color: rgba(255,255,255,0.4);">Over 0.5</span><br>
+            <b style="color: #30d158;">{sim['Goals']['Over_0_5']}%</b>
         </div>
     </div>
     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
@@ -781,14 +708,14 @@ with tab_feed:
     board_display_list = upcoming_games if show_upcoming_only else all_today_games
     sorted_board = sorted(board_display_list, key=lambda x: x["recommendation"]["confidence"], reverse=True)
     
-    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S MATCH BOARD</span>')
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S OPTIMAL MATCH BOARD</span>')
     if sorted_board:
         render_quant_grid(sorted_board)
     else:
         st.info("No fixtures to display.")
 
 # =====================================================================
-# TAB 2: STAKE THIS GAME (EXACT 10X VAULT - ZERO TEAM GOAL TRAPS)
+# TAB 2: STAKE THIS GAME (EXACT 10X VAULT - 3 MARKETS ONLY)
 # =====================================================================
 with tab_stake_game:
     render_html("""
@@ -802,7 +729,7 @@ with tab_stake_game:
         </div>
     </div>
     <p style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.65); margin-bottom: 14px;">
-        Engineered specifically for your daily stake with <b>nothing less than 10.00x odds</b>. Built using only high-cushion markets (Double Chance, DNB, Over 0.5, and Positive Handicaps).
+        Engineered specifically for your daily stake with <b>nothing less than 10.00x odds</b>. Built strictly using: <b>Double Chance</b>, <b>Over 1.5 Goals</b>, and <b>Over 0.5 Goals</b>.
     </p>
     """)
 
@@ -819,7 +746,7 @@ with tab_stake_game:
                     <h3 style="margin: 0; font-size: 1.35rem; color: #ffffff;">🔥 STAKE THIS GAME (MASTER SLIP)</h3>
                 </div>
                 <div style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 4px;">
-                    {len(stake_slip)} safe selections &nbsp;•&nbsp; Avg {stake_avg_conf}% certainty &nbsp;•&nbsp; <span style="color: #00e676; font-weight: 700;">Shielded Anti-Cut Core</span>
+                    {len(stake_slip)} safe selections &nbsp;•&nbsp; Avg {stake_avg_conf}% certainty &nbsp;•&nbsp; <span style="color: #00e676; font-weight: 700;">Shielded Core (DC, 1.5, 0.5)</span>
                 </div>
             </div>
             <div style="font-size: 2.2rem; font-weight: 800; color: #00e676; letter-spacing: -0.02em;">
@@ -926,7 +853,7 @@ with tab_surebets:
         </div>
     </div>
     <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Selections dynamically correlate to your target odds without stopping prematurely.
+        Selections strictly compounded using: <b>Double Chance (1X/X2/12)</b>, <b>Over 1.5 Goals</b>, and <b>Over 0.5 Goals</b>.
     </p>
     """)
 
@@ -1044,7 +971,7 @@ with tab_kelly:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_k2:
-        recommended_stake, calculated_edge = AntiOneCutEngine.calculate_kelly(
+        recommended_stake, calculated_edge = ExclusiveThreeMarketEngine.calculate_kelly(
             user_bankroll, model_prob_in, bookie_odds, kelly_fraction
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
@@ -1135,6 +1062,6 @@ with tab_analyzer:
 """)
 
         with col_m2:
-            st.info("Anti-Cut simulation matrix active.")
+            st.info("Locked 3-market simulation active.")
     else:
         st.info("Select a fixture to inspect.")
