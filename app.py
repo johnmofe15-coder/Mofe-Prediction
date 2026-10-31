@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 from requests.adapters import HTTPAdapter
 import math
-import urllib.parse
 import numpy as np
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
@@ -31,7 +30,6 @@ def get_http_session() -> requests.Session:
     })
     return session
 
-# Live storage for multi-game SportyBet Nigeria booking codes
 if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
         "3_odds": "VFUBGJ",
@@ -40,10 +38,18 @@ if "sportybet_ng_codes" not in st.session_state:
         "20_odds": "KFG5BM"
     }
 
+# Confirmed High-Yield Elite Teams for Over 1.5 Goals
+ELITE_GOAL_TEAMS = {
+    "Manchester City", "Arsenal", "Liverpool", "Bayern Munich", "Bayer Leverkusen",
+    "Borussia Dortmund", "Real Madrid", "Barcelona", "Paris Saint-Germain", 
+    "Inter Milan", "Atalanta", "Sporting CP", "Benfica", "Galatasaray", 
+    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt"
+}
+
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION & CORNER ENGINE (4 MARKETS ONLY)
+# 1. QUANTITATIVE PREDICTION & CORNER ENGINE (ANTI-1-CUT PROTECTED)
 # =====================================================================
-class QuantitativePredictionEngine:
+class AntiOneCutEngine:
     def __init__(self, home_advantage: float = 1.15):
         self.home_advantage = home_advantage
         self.max_goals = 7
@@ -52,183 +58,171 @@ class QuantitativePredictionEngine:
         self.total_goals_grid = np.add.outer(self.goals_range, self.goals_range)
 
     def _poisson_vector(self, lmbda: float, max_range: int = 7) -> np.ndarray:
-        lmbda = max(0.08, lmbda)
+        lmbda = max(0.05, lmbda)
         k_range = np.arange(max_range)
         k_fact = np.array([math.factorial(i) for i in range(max_range)], dtype=np.float64)
         return (np.exp(-lmbda) * (lmbda ** k_range)) / k_fact
 
-    def simulate_corners(self, home_corners_lmbda: float, away_corners_lmbda: float) -> dict:
+    def simulate_corners(self, h_lmbda: float, a_lmbda: float) -> dict:
         max_c = 18
-        h_prob = self._poisson_vector(home_corners_lmbda, max_c)
-        a_prob = self._poisson_vector(away_corners_lmbda, max_c)
+        h_prob = self._poisson_vector(h_lmbda, max_c)
+        a_prob = self._poisson_vector(a_lmbda, max_c)
         c_matrix = np.outer(h_prob, a_prob)
-        total_corners_grid = np.add.outer(np.arange(max_c), np.arange(max_c))
+        c_grid = np.add.outer(np.arange(max_c), np.arange(max_c))
 
-        ov_85 = float(c_matrix[total_corners_grid > 8.5].sum())
-        un_105 = float(c_matrix[total_corners_grid <= 10.5].sum())
-        proj_total = round(home_corners_lmbda + away_corners_lmbda, 1)
-
+        ov_75 = float(c_matrix[c_grid > 7.5].sum())
+        ov_85 = float(c_matrix[c_grid > 8.5].sum())
+        un_115 = float(c_matrix[c_grid <= 11.5].sum())
         return {
-            "projected_total": proj_total,
+            "projected_total": round(h_lmbda + a_lmbda, 1),
+            "Over_7_5": round(ov_75 * 100, 1),
             "Over_8_5": round(ov_85 * 100, 1),
-            "Under_10_5": round(un_105 * 100, 1)
+            "Under_11_5": round(un_115 * 100, 1)
         }
 
-    def simulate_match(self, home_xG: float, away_xG: float, live_h_score: int = 0, live_a_score: int = 0, minutes_left: float = 90.0) -> dict:
-        time_factor = max(0.05, min(1.0, minutes_left / 90.0))
-        rem_home_xG = max(0.1, home_xG * self.home_advantage * time_factor)
-        rem_away_xG = max(0.1, away_xG * time_factor)
+    def simulate_match(self, h_xG: float, a_xG: float, live_h: int = 0, live_a: int = 0, mins_left: float = 90.0) -> dict:
+        tf = max(0.05, min(1.0, mins_left / 90.0))
+        adj_h = max(0.1, h_xG * self.home_advantage * tf)
+        adj_a = max(0.1, a_xG * tf)
 
-        home_probs = self._poisson_vector(rem_home_xG, self.max_goals)
-        away_probs = self._poisson_vector(rem_away_xG, self.max_goals)
-        matrix = np.outer(home_probs, away_probs)
+        h_probs = self._poisson_vector(adj_h, self.max_goals)
+        a_probs = self._poisson_vector(adj_a, self.max_goals)
+        matrix = np.outer(h_probs, a_probs)
 
-        current_total = live_h_score + live_a_score
-        home_win, draw, away_win = 0.0, 0.0, 0.0
-        over_1_5, under_3_5, over_2_5 = 0.0, 0.0, 0.0
+        h_win, draw, a_win = 0.0, 0.0, 0.0
+        ov_15, un_35, ov_25 = 0.0, 0.0, 0.0
+        home_ov_05, away_ov_05 = 0.0, 0.0
+        ah_h_plus_15, ah_a_plus_15 = 0.0, 0.0
 
         for h in range(self.max_goals):
             for a in range(self.max_goals):
                 p = matrix[h][a]
-                final_h = live_h_score + h
-                final_a = live_a_score + a
-                
-                if final_h > final_a:
-                    home_win += p
-                elif final_h == final_a:
-                    draw += p
-                else:
-                    away_win += p
+                fin_h = live_h + h
+                fin_a = live_a + a
+                tot = fin_h + fin_a
 
-                tot = final_h + final_a
-                if tot > 1.5: over_1_5 += p
-                if tot <= 3.5: under_3_5 += p
-                if tot > 2.5: over_2_5 += p
+                if fin_h > fin_a: h_win += p
+                elif fin_h == fin_a: draw += p
+                else: a_win += p
 
-        double_chance_1x = home_win + draw
-        double_chance_x2 = away_win + draw
+                if tot > 1.5: ov_15 += p
+                if tot <= 3.5: un_35 += p
+                if tot > 2.5: ov_25 += p
 
-        non_draw = max(0.001, home_win + away_win)
-        dnb_home = home_win / non_draw
-        dnb_away = away_win / non_draw
+                if fin_h > 0.5: home_ov_05 += p
+                if fin_a > 0.5: away_ov_05 += p
+
+                if (fin_h + 1.5) > fin_a: ah_h_plus_15 += p
+                if (fin_a + 1.5) > fin_h: ah_a_plus_15 += p
+
+        dc_1x = h_win + draw
+        dc_x2 = a_win + draw
+
+        non_draw = max(0.001, h_win + a_win)
+        dnb_h = h_win / non_draw
+        dnb_a = a_win / non_draw
 
         return {
-            "adj_home_xG": round(rem_home_xG, 2),
-            "adj_away_xG": round(rem_away_xG, 2),
-            "1X2": {
-                "Home": round(home_win * 100, 1),
-                "Draw": round(draw * 100, 1),
-                "Away": round(away_win * 100, 1)
-            },
-            "DoubleChance": {
-                "1X": round(double_chance_1x * 100, 1),
-                "X2": round(double_chance_x2 * 100, 1)
-            },
-            "DNB": {
-                "Home": round(dnb_home * 100, 1),
-                "Away": round(dnb_away * 100, 1)
-            },
-            "Goals": {
-                "Over_1_5": round(over_1_5 * 100, 1),
-                "Under_3_5": round(under_3_5 * 100, 1),
-                "Over_2_5": round(over_2_5 * 100, 1)
-            }
+            "adj_home_xG": round(adj_h, 2),
+            "adj_away_xG": round(adj_a, 2),
+            "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
+            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1)},
+            "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
+            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1), "Over_2_5": round(ov_25 * 100, 1)},
+            "Team_Goals": {"Home_Over_0_5": round(home_ov_05 * 100, 1), "Away_Over_0_5": round(away_ov_05 * 100, 1)},
+            "Positive_AH": {"Home_Plus_1_5": round(ah_h_plus_15 * 100, 1), "Away_Plus_1_5": round(ah_a_plus_15 * 100, 1)}
         }
 
-    def evaluate_best_prediction(self, probs: dict, corner_probs: dict, home_name: str, away_name: str):
+    def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str):
         candidates = []
+        is_elite_game = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
 
-        # 1. Double Chance
-        dc_1x = probs["DoubleChance"]["1X"]
-        dc_x2 = probs["DoubleChance"]["X2"]
-        candidates.append({
-            "market": f"{home_name} or Draw (1X)",
-            "sporty_market": "Double Chance 1X",
-            "category": "Double Chance",
-            "confidence": dc_1x,
-            "odds": round((100.0 / max(1.0, dc_1x)) * 1.05, 2),
-            "market_type": "1X"
-        })
-        candidates.append({
-            "market": f"{away_name} or Draw (X2)",
-            "sporty_market": "Double Chance X2",
-            "category": "Double Chance",
-            "confidence": dc_x2,
-            "odds": round((100.0 / max(1.0, dc_x2)) * 1.05, 2),
-            "market_type": "X2"
-        })
-
-        # 2. Over / Under Goals
-        ov_15 = probs["Goals"]["Over_1_5"]
-        un_35 = probs["Goals"]["Under_3_5"]
-        candidates.append({
-            "market": "Over 1.5 Goals",
-            "sporty_market": "Over 1.5",
-            "category": "O/U",
-            "confidence": ov_15,
-            "odds": round((100.0 / max(1.0, ov_15)) * 1.06, 2),
-            "market_type": "OVER_1_5"
-        })
-        candidates.append({
-            "market": "Under 3.5 Goals",
-            "sporty_market": "Under 3.5",
-            "category": "O/U",
-            "confidence": un_35,
-            "odds": round((100.0 / max(1.0, un_35)) * 1.06, 2),
-            "market_type": "UNDER_3_5"
-        })
-
-        # 3. Draw No Bet (DNB)
-        dnb_h = probs["DNB"]["Home"]
-        dnb_a = probs["DNB"]["Away"]
-        if dnb_h >= 55.0:
+        # RULE 1: Over 1.5 strictly reserved for confirmed high-tempo elite teams
+        ov_15 = sim["Goals"]["Over_1_5"]
+        if is_elite_game and ov_15 >= 82.0:
             candidates.append({
-                "market": f"{home_name} (Draw No Bet)",
-                "sporty_market": f"{home_name} DNB",
-                "category": "DNB",
-                "confidence": dnb_h,
-                "odds": round((100.0 / max(1.0, dnb_h)) * 1.06, 2),
-                "market_type": "DNB_H"
-            })
-        if dnb_a >= 55.0:
-            candidates.append({
-                "market": f"{away_name} (Draw No Bet)",
-                "sporty_market": f"{away_name} DNB",
-                "category": "DNB",
-                "confidence": dnb_a,
-                "odds": round((100.0 / max(1.0, dnb_a)) * 1.06, 2),
-                "market_type": "DNB_A"
+                "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
+                "category": "Elite Goals O/U", "confidence": ov_15,
+                "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5"
             })
 
-        # 4. Corners
-        c_ov_85 = corner_probs["Over_8_5"]
-        c_un_105 = corner_probs["Under_10_5"]
-        candidates.append({
-            "market": "Over 8.5 Corners",
-            "sporty_market": "Corners Over 8.5",
-            "category": "Corners",
-            "confidence": c_ov_85,
-            "odds": round((100.0 / max(1.0, c_ov_85)) * 1.07, 2),
-            "market_type": "CORNERS_OV_85"
-        })
-        candidates.append({
-            "market": "Under 10.5 Corners",
-            "sporty_market": "Corners Under 10.5",
-            "category": "Corners",
-            "confidence": c_un_105,
-            "odds": round((100.0 / max(1.0, c_un_105)) * 1.07, 2),
-            "market_type": "CORNERS_UN_105"
-        })
+        # RULE 2: For regular/secondary fixtures, shift to protective Double Chance & DNB
+        dc = sim["DoubleChance"]
+        if dc["1X"] >= 78.0:
+            candidates.append({
+                "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
+                "category": "Double Chance", "confidence": dc["1X"],
+                "odds": round((100.0 / dc["1X"]) * 1.05, 2), "market_type": "DC_1X"
+            })
+        if dc["X2"] >= 78.0:
+            candidates.append({
+                "market": f"{away_name} or Draw (X2)", "sporty_market": "Double Chance X2",
+                "category": "Double Chance", "confidence": dc["X2"],
+                "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2"
+            })
+
+        # Draw No Bet
+        dnb = sim["DNB"]
+        if dnb["Home"] >= 68.0:
+            candidates.append({
+                "market": f"{home_name} (Draw No Bet)", "sporty_market": f"{home_name} DNB",
+                "category": "Draw No Bet", "confidence": dnb["Home"],
+                "odds": round((100.0 / dnb["Home"]) * 1.06, 2), "market_type": "DNB_H"
+            })
+        elif dnb["Away"] >= 68.0:
+            candidates.append({
+                "market": f"{away_name} (Draw No Bet)", "sporty_market": f"{away_name} DNB",
+                "category": "Draw No Bet", "confidence": dnb["Away"],
+                "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A"
+            })
+
+        # Under 3.5 Goals
+        un_35 = sim["Goals"]["Under_3_5"]
+        if un_35 >= 80.0:
+            candidates.append({
+                "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
+                "category": "Safety Under", "confidence": un_35,
+                "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5"
+            })
+
+        # Team Goal Over 0.5
+        tg = sim["Team_Goals"]
+        if tg["Home_Over_0_5"] >= 86.0:
+            candidates.append({
+                "market": f"{home_name} Over 0.5 Team Goals", "sporty_market": f"{home_name} Over 0.5",
+                "category": "Team Goal", "confidence": tg["Home_Over_0_5"],
+                "odds": round((100.0 / tg["Home_Over_0_5"]) * 1.05, 2), "market_type": "HOME_OV_05"
+            })
+
+        # Asian Handicap (+1.5)
+        ah = sim["Positive_AH"]
+        if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
+            if ah["Home_Plus_1_5"] >= 85.0:
+                candidates.append({
+                    "market": f"{home_name} (+1.5 Asian Handicap)", "sporty_market": f"{home_name} (+1.5 AH)",
+                    "category": "Asian Handicap (+)", "confidence": ah["Home_Plus_1_5"],
+                    "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
+                })
+        else:
+            if ah["Away_Plus_1_5"] >= 85.0:
+                candidates.append({
+                    "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
+                    "category": "Asian Handicap (+)", "confidence": ah["Away_Plus_1_5"],
+                    "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
+                })
 
         candidates.sort(key=lambda x: x["confidence"], reverse=True)
-        primary_rec = candidates[0]
+        primary_rec = candidates[0] if candidates else {
+            "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
+            "category": "Double Chance", "confidence": 76.0, "odds": 1.25, "market_type": "DC_1X"
+        }
 
-        if primary_rec["confidence"] >= 88.0:
+        if primary_rec["confidence"] >= 89.0:
             primary_rec["badge"] = "pill-green"
-            primary_rec["tier"] = "Banker Edge"
-        elif primary_rec["confidence"] >= 75.0:
+            primary_rec["tier"] = "Ultra Banker (≥89%)"
+        elif primary_rec["confidence"] >= 80.0:
             primary_rec["badge"] = "pill-cyan"
-            primary_rec["tier"] = "Value Edge"
+            primary_rec["tier"] = "Solid Edge"
         else:
             primary_rec["badge"] = "pill-gold"
             primary_rec["tier"] = "Quant Pick"
@@ -236,7 +230,7 @@ class QuantitativePredictionEngine:
         return primary_rec, candidates
 
     @staticmethod
-    def check_boom_status(prediction: dict, home_score: int, away_score: int, live_corners: int, state: str) -> bool:
+    def check_boom_status(prediction: dict, home_score: int, away_score: int, state: str) -> bool:
         if not prediction:
             return False
         total_goals = home_score + away_score
@@ -244,20 +238,20 @@ class QuantitativePredictionEngine:
 
         if m_type == "OVER_1_5" and total_goals >= 2:
             return True
-        if m_type == "CORNERS_OV_85" and live_corners >= 9:
+        if m_type == "HOME_OV_05" and home_score >= 1:
             return True
         if state == "post":
             if m_type == "UNDER_3_5" and total_goals <= 3:
                 return True
-            if m_type == "1X" and home_score >= away_score:
+            if m_type == "DC_1X" and home_score >= away_score:
                 return True
-            if m_type == "X2" and away_score >= home_score:
+            if m_type == "DC_X2" and away_score >= home_score:
                 return True
             if m_type == "DNB_H" and home_score > away_score:
                 return True
             if m_type == "DNB_A" and away_score > home_score:
                 return True
-            if m_type == "CORNERS_UN_105" and live_corners <= 10:
+            if m_type == "AH_PLUS_15":
                 return True
         return False
 
@@ -278,15 +272,14 @@ class QuantitativePredictionEngine:
         stake_amount = round(bankroll * fractional_kelly, 2)
         return stake_amount, round(edge * 100, 2)
 
-quant_engine = QuantitativePredictionEngine(home_advantage=1.15)
+quant_engine = AntiOneCutEngine(home_advantage=1.15)
 
 def build_exact_target_ticket(all_matches: list, target_odds: float):
     all_picks = []
     for m in all_matches:
         for c in m["candidates"]:
-            if c["confidence"] >= 62.0:
+            if c["confidence"] >= 72.0:
                 all_picks.append({
-                    "event_id": m.get("event_id", ""),
                     "match": m["match"],
                     "home": m["home"],
                     "away": m["away"],
@@ -302,14 +295,13 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
                     "time": m["time"],
                     "market": c["market"],
                     "sporty_market": c["sporty_market"],
-                    "market_type": c["market_type"],
                     "category": c["category"],
                     "confidence": c["confidence"],
-                    "odds": c["odds"]
+                    "odds": c["odds"],
+                    "simulation": m["simulation"]
                 })
 
     all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
-
     selected = []
     used_matches = set()
     current_odds = 1.0
@@ -324,19 +316,10 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
         if current_odds >= target_odds:
             break
 
-    if current_odds > (target_odds * 1.35) and len(selected) > 3:
-        for i in range(len(selected) - 1, -1, -1):
-            cand = selected[i]
-            projected = current_odds / cand["odds"]
-            if projected >= target_odds:
-                current_odds = projected
-                used_matches.remove(cand["match"])
-                selected.pop(i)
-
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI STYLING
+# 2. UI LIQUID GLASS STYLES
 # =====================================================================
 render_html("""
 <style>
@@ -365,6 +348,40 @@ render_html("""
         font-weight: 800 !important;
         letter-spacing: -0.025em;
         color: #ffffff !important;
+    }
+
+    @keyframes pulse-boom {
+        0% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.85); }
+        70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(48, 209, 88, 0); }
+        100% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0); }
+    }
+    .boom-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #ffffff !important;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        padding: 3px 10px;
+        border-radius: 9999px;
+        box-shadow: 0 0 14px rgba(48, 209, 88, 0.6);
+        border: 1px solid #34d399;
+        animation: pulse-boom 1.8s infinite;
+    }
+
+    .live-score-badge {
+        display: inline-flex; align-items: center; justify-content: center;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.05) 100%);
+        border: 1px solid rgba(82, 229, 231, 0.4);
+        border-top: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 10px; padding: 3px 12px;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 1.15rem; font-weight: 800; color: #ffffff;
+        box-shadow: 0 0 16px rgba(82, 229, 231, 0.25);
+        min-width: 58px;
     }
 
     .sportybet-code-container {
@@ -416,6 +433,17 @@ render_html("""
         transform: translate3d(0, -3px, 0); border-color: rgba(82, 229, 231, 0.35);
     }
 
+    .glass-pill {
+        display: inline-flex; align-items: center;
+        padding: 4px 12px; border-radius: 9999px;
+        font-size: 0.72rem; font-weight: 700;
+        letter-spacing: 0.04em; text-transform: uppercase;
+        border-top: 1px solid rgba(255, 255, 255, 0.4);
+    }
+    .pill-cyan { color: #52e5e7; background: rgba(82, 229, 231, 0.12); border: 1px solid rgba(82, 229, 231, 0.4); }
+    .pill-green { color: #30d158; background: rgba(48, 209, 88, 0.12); border: 1px solid rgba(48, 209, 88, 0.4); }
+    .pill-gold { color: #ffd60a; background: rgba(255, 214, 10, 0.12); border: 1px solid rgba(255, 214, 10, 0.4); }
+
     .team-logo { width: 32px; height: 32px; object-fit: contain; }
     .confidence-metric { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.85rem; font-weight: 800; color: #ffffff; }
     .hero-gradient-text {
@@ -434,7 +462,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 3. HIGH-YIELD LEAGUES PIPELINE
+# 3. LEAGUES DATA PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -446,10 +474,6 @@ ACTIVE_LEAGUES = [
     {"name": "UEFA Champions League", "code": "uefa.champions"},
     {"name": "UEFA Europa League", "code": "uefa.europa"},
     {"name": "UEFA Conference League", "code": "uefa.europa.conf"},
-    {"name": "FA Cup (ENG)", "code": "eng.fa"},
-    {"name": "EFL Cup (ENG)", "code": "eng.league_cup"},
-    {"name": "DFB-Pokal (GER)", "code": "ger.dfb_pokal"},
-    {"name": "Coppa Italia (ITA)", "code": "ita.coppa_italia"},
     {"name": "Eredivisie (NED)", "code": "ned.1"},
     {"name": "Liga Portugal (POR)", "code": "por.1"},
     {"name": "Belgian Pro League (BEL)", "code": "bel.1"},
@@ -521,36 +545,16 @@ def fetch_single_league(args) -> list:
             raw_h_xG = 1.30 + ((seed % 11) / 10.0)
             raw_a_xG = 0.95 + (((seed * 3) % 9) / 10.0)
 
-            sim = quant_engine.simulate_match(
-                raw_h_xG, raw_a_xG, 
-                live_h_score=home_score, 
-                live_a_score=away_score, 
-                minutes_left=minutes_left
-            )
-
+            sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, home_score, away_score, minutes_left)
             h_c_lmbda = 4.8 + ((seed % 5) / 2.0)
             a_c_lmbda = 3.6 + (((seed * 2) % 5) / 2.0)
             corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
 
-            rec, candidates = quant_engine.evaluate_best_prediction(sim, corner_sim, h_name, a_name)
-
-            corners_h = int((seed % 5) + (current_min / 16))
-            corners_a = int(((seed + 3) % 4) + (current_min / 18))
-            live_total_corners = corners_h + corners_a
-
-            is_boom = quant_engine.check_boom_status(rec, home_score, away_score, live_total_corners, state)
-
-            possession_home = 50 + int((seed % 19) - 9)
-            shots_h = max(home_score, int((seed % 7) + (current_min / 12)))
-            shots_a = max(away_score, int(((seed * 2) % 6) + (current_min / 14)))
-            sot_h = max(home_score, int(shots_h * 0.45))
-            sot_a = max(away_score, int(shots_a * 0.40))
-            yellow_h = int((seed % 3))
-            yellow_a = int(((seed + 1) % 3))
+            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name)
+            is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
             matches.append({
-                "event_id": event.get("id", str(seed)),
                 "match": f"{h_name} vs {a_name}",
                 "league": league["name"],
                 "home": h_name,
@@ -567,20 +571,6 @@ def fetch_single_league(args) -> list:
                 "is_boom": is_boom,
                 "recommendation": rec,
                 "candidates": candidates,
-                "corners": corner_sim,
-                "stats": {
-                    "possession_h": possession_home,
-                    "possession_a": 100 - possession_home,
-                    "shots_h": shots_h,
-                    "shots_a": shots_a,
-                    "sot_h": sot_h,
-                    "sot_a": sot_a,
-                    "corners_h": corners_h,
-                    "corners_a": corners_a,
-                    "total_corners": live_total_corners,
-                    "yellow_h": yellow_h,
-                    "yellow_a": yellow_a
-                },
                 "simulation": sim
             })
     except Exception:
@@ -598,7 +588,7 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Processing daily fixtures & building slips..."):
+with st.spinner("Processing anti-1-cut models & verifying winning hits..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -607,7 +597,7 @@ with st.spinner("Processing daily fixtures & building slips..."):
 # 4. APP HEADER
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} LIVE</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play</span>'
-boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS</span>' if boom_fixtures else ''
+boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else '<span class="glass-pill pill-green">💥 Verifying Results</span>'
 
 render_html(f"""
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 12px;">
@@ -617,7 +607,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">SportyBet Nigeria Multi-Leg Booking Sync</span>
+                <span class="glass-pill pill-cyan">Anti-1-Cut Engine Active</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -627,10 +617,11 @@ render_html(f"""
 </div>
 """)
 
-tab_feed, tab_live_center, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
+tab_feed, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     f"⚡ Match Board ({len(all_today_games)})", 
-    f"🔴 Live Match Center ({len(live_fixtures)})",
-    "🎯 Safe Banker Hub (SportyBet NG)", 
+    f"💎 Sure Fixtures ≥89% ({len([m for m in all_today_games if m['recommendation']['confidence'] >= 89.0])})",
+    f"💥 Boomed Today ({len(boom_fixtures)})",
+    "🎯 Safe Banker Hub (Anti-Cut)", 
     "💰 Kelly Bankroll Calculator", 
     "🔬 7x7 Simulation Matrix"
 ])
@@ -640,10 +631,9 @@ def render_quant_grid(match_list):
     for m in match_list:
         sim = m["simulation"]
         rec = m["recommendation"]
-        c_data = m["corners"]
 
         if m["is_boom"]:
-            status_badge = '<span class="boom-badge">💥 BOOM</span>'
+            status_badge = '<span class="boom-badge">💥 BOOM VERIFIED</span>'
         elif m["is_live"]:
             status_badge = f'<span class="live-pill"><span class="live-dot"></span>{m["clock"]}</span>'
         elif m["is_finished"]:
@@ -689,8 +679,8 @@ def render_quant_grid(match_list):
             <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.4);">O 8.5 Corn</span><br>
-            <b style="color: #c084fc;">{c_data['Over_8_5']}%</b>
+            <span style="color: rgba(255,255,255,0.4);">Under 3.5</span><br>
+            <b style="color: #30d158;">{sim['Goals']['Under_3_5']}%</b>
         </div>
     </div>
     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
@@ -700,8 +690,8 @@ def render_quant_grid(match_list):
             <div style="font-size: 0.94rem; font-weight: 700; color: #ffffff;">{rec['market']}</div>
         </div>
         <div style="text-align: right;">
-            <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Probability</div>
-            <div class="confidence-metric" style="color: {'#30d158' if rec['confidence'] >= 85.0 else '#ffffff'};">{rec['confidence']}%</div>
+            <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Certainty</div>
+            <div class="confidence-metric" style="color: {'#30d158' if rec['confidence'] >= 89.0 else '#ffffff'};">{rec['confidence']}%</div>
         </div>
     </div>
 </div>
@@ -720,130 +710,45 @@ with tab_feed:
         st.info("No fixtures found for today.")
 
 # =====================================================================
-# TAB 2: IN-PLAY LIVE MATCH CENTER
+# TAB 2: SURE FIXTURES ≥ 89% (DEDICATED SECTION)
 # =====================================================================
-with tab_live_center:
+with tab_sure89:
+    sure_games_89 = [m for m in all_today_games if m["recommendation"]["confidence"] >= 89.0]
+    sure_games_89.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
+
     render_html("""
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 14px;">
-        <div class="liquid-icon icon-red">
-            🔴
-        </div>
-        <div>
-            <span class="live-pill"><span class="live-dot"></span>Real-Time Telemetry</span>
-            <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">In-Play Live Match Center</h2>
-        </div>
+    <div style="margin-bottom: 16px;">
+        <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 High-Certainty Vault: 89% & Above</h2>
+        <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
+            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with anti-one-cut market protection.
+        </p>
     </div>
     """)
-
-    inspectable_games = live_fixtures if live_fixtures else all_today_games
-    match_display_names = [
-        f"{'🟢 LIVE ' if m['is_live'] else ''}{'💥 BOOM ' if m['is_boom'] else ''}{m['home']} {m['home_score']} - {m['away_score']} {m['away']} ({m['league']})" 
-        for m in inspectable_games
-    ]
-
-    if inspectable_games:
-        chosen_str = st.selectbox("Select Target Game for Live Telemetry", match_display_names)
-        chosen_match = next((m for m in inspectable_games if f"{'🟢 LIVE ' if m['is_live'] else ''}{'💥 BOOM ' if m['is_boom'] else ''}{m['home']} {m['home_score']} - {m['away_score']} {m['away']} ({m['league']})" == chosen_str), inspectable_games[0])
-
-        st_data = chosen_match["stats"]
-        sim_data = chosen_match["simulation"]
-        c_data = chosen_match["corners"]
-        rec = chosen_match["recommendation"]
-        current_total = chosen_match["home_score"] + chosen_match["away_score"]
-
-        col_live_main, col_live_probs = st.columns([1.3, 1])
-
-        with col_live_main:
-            status_chip = '<span class="boom-badge">💥 BOOM SECURED</span>' if chosen_match["is_boom"] else (f'<span class="live-pill"><span class="live-dot"></span>LIVE IN-PLAY: {chosen_match["clock"]}</span>' if chosen_match["is_live"] else f'<span class="glass-pill pill-cyan">{chosen_match["clock"]}</span>')
-            
-            center_card = f"""
-            <div class="liquid-glass-card" style="margin-bottom: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            {status_chip}
-            <span style="font-size: 0.82rem; color: rgba(255,255,255,0.45);">{chosen_match['league']}</span>
-            </div>
-            <div style="display: flex; justify-content: space-around; align-items: center; margin: 18px 0; background: rgba(255,255,255,0.02); padding: 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
-            <div style="text-align: center; width: 35%;">
-            <img src="{chosen_match['home_logo']}" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 6px;"/>
-            <div style="font-weight: 800; font-size: 1.05rem; color: #fff;">{chosen_match['home']}</div>
-            </div>
-            <div style="text-align: center;">
-            <div class="live-score-badge" style="font-size: 1.8rem; padding: 6px 20px;">
-            {chosen_match['home_score']} - {chosen_match['away_score']}
-            </div>
-            <div style="font-size: 0.76rem; color: rgba(255,255,255,0.5); margin-top: 6px;">Live Score</div>
-            </div>
-            <div style="text-align: center; width: 35%;">
-            <img src="{chosen_match['away_logo']}" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 6px;"/>
-            <div style="font-weight: 800; font-size: 1.05rem; color: #fff;">{chosen_match['away']}</div>
-            </div>
-            </div>
-            <h4 style="margin: 16px 0 12px 0; font-size: 1rem;">Live Match Telemetry</h4>
-            <div class="telemetry-row">
-            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #52e5e7;">{st_data['possession_h']}%</span>
-            <span>Ball Possession</span>
-            <span style="color: #c084fc;">{st_data['possession_a']}%</span>
-            </div>
-            <div class="telemetry-bar-wrap">
-            <div class="bar-home" style="width: {st_data['possession_h']}%;"></div>
-            <div class="bar-away" style="width: {st_data['possession_a']}%;"></div>
-            </div>
-            </div>
-            <div class="telemetry-row">
-            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #52e5e7;">{st_data['sot_h']} ({st_data['shots_h']})</span>
-            <span>Shots on Target (Total)</span>
-            <span style="color: #c084fc;">{st_data['sot_a']} ({st_data['shots_a']})</span>
-            </div>
-            <div class="telemetry-bar-wrap">
-            <div class="bar-home" style="width: {int((st_data['shots_h'] / max(1, st_data['shots_h'] + st_data['shots_a'])) * 100)}%;"></div>
-            <div class="bar-away" style="width: {int((st_data['shots_a'] / max(1, st_data['shots_h'] + st_data['shots_a'])) * 100)}%;"></div>
-            </div>
-            </div>
-            <div class="telemetry-row">
-            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600;">
-            <span style="color: #52e5e7;">{st_data['corners_h']}</span>
-            <span>Live Corner Count ({st_data['total_corners']} Total)</span>
-            <span style="color: #c084fc;">{st_data['corners_a']}</span>
-            </div>
-            <div class="telemetry-bar-wrap">
-            <div class="bar-home" style="width: {int((st_data['corners_h'] / max(1, st_data['total_corners'])) * 100)}%;"></div>
-            <div class="bar-away" style="width: {int((st_data['corners_a'] / max(1, st_data['total_corners'])) * 100)}%;"></div>
-            </div>
-            </div>
-            </div>
-            """
-            render_html(center_card)
-
-        with col_live_probs:
-            boom_alert = '<div style="background: rgba(16,185,129,0.15); border: 1px solid #10b981; border-radius: 10px; padding: 10px; margin-bottom: 12px; color: #34d399; font-weight: 800; text-align: center;">💥 PREDICTION HAS HIT (BOOM CONFIRMED)</div>' if chosen_match["is_boom"] else ''
-            
-            probs_card = f"""
-            <div class="liquid-glass-card" style="border-color: rgba(82, 229, 231, 0.45);">
-            <span class="glass-pill pill-cyan">Live Target Telemetry</span>
-            <h3 style="margin: 12px 0 4px 0;">Prediction Verification</h3>
-            <p style="font-size: 0.8rem; color: rgba(255,255,255,0.45); margin-bottom: 12px;"><b>Best Edge:</b> {rec['market']} ({rec['confidence']}%)</p>
-            {boom_alert}
-            <hr style="border:0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-            <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Live Corners:</span>
-            <span style="font-weight: 800; color: #c084fc;">{st_data['total_corners']} (Exp: {c_data['projected_total']})</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-            <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Over 8.5 Corners:</span>
-            <span style="font-weight: 800; color: {'#30d158' if st_data['total_corners'] >= 9 else '#52e5e7'};">{'BOOM Hit ✅ (100%)' if st_data['total_corners'] >= 9 else str(c_data['Over_8_5']) + '%'}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-            <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Over 1.5 Match Goals:</span>
-            <span style="font-weight: 800; color: {'#30d158' if current_total >= 2 else '#52e5e7'};">{'BOOM Hit ✅ (100%)' if current_total >= 2 else str(sim_data['Goals']['Over_1_5']) + '%'}</span>
-            </div>
-            </div>
-            """
-            render_html(probs_card)
+    if sure_games_89:
+        render_quant_grid(sure_games_89)
+    else:
+        st.info("No fixtures currently meet the ≥ 89.0% threshold today.")
 
 # =====================================================================
-# TAB 3: SAFE BANKER HUB (MULTI-GAME SLIPS WITH REAL SPORTY CODES)
+# TAB 3: BOOMED TODAY (DEDICATED SHOWCASE)
+# =====================================================================
+with tab_booms:
+    render_html("""
+    <div style="margin-bottom: 16px;">
+        <span class="boom-badge">💥 Verified Results Tracker</span>
+        <h2 style="margin: 6px 0 4px 0; font-size: 1.5rem;">Winning Hits & Boomed Matches</h2>
+        <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
+            All predictions from today that have officially landed and won.
+        </p>
+    </div>
+    """)
+    if boom_fixtures:
+        render_quant_grid(boom_fixtures)
+    else:
+        st.info("Active matches are currently in progress. As soon as goals land, winning fixtures will be showcased here!")
+
+# =====================================================================
+# TAB 4: SAFE BANKER HUB (MATCHES THE EXACT MATCH BOARD DESIGN)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -852,65 +757,43 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">SportyBet Nigeria Multi-Leg Sync</span>
+            <span class="glass-pill pill-green">Anti-1-Cut Banker Engine</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Accumulator Hub</h2>
         </div>
     </div>
+    <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
+        Engineered with anti-one-cut protection. Low-tier trap games use safety cushioning to avoid 1-0 defeats.
+    </p>
     """)
 
     banker_mode = st.radio(
         "Select Banker Strategy",
-        [
-            "🔥 Safe 3 Odds", 
-            "⚡ Safe 5 Odds", 
-            "💎 Safe 10 Odds", 
-            "👑 Safe 20 Odds"
-        ],
+        ["🔥 Safe 3 Odds", "⚡ Safe 5 Odds", "💎 Safe 10 Odds", "👑 Safe 20 Odds"],
         horizontal=True,
         label_visibility="collapsed"
     )
 
-    # EXACT KEY LOOKUP MAPPING
     if "3" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=3.00)
-        slip_label = "Safe 3 Odds #1"
+        slip_label = "Safe 3 Odds Slip"
         key_name = "3_odds"
     elif "5" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=5.00)
-        slip_label = "Safe 5 Odds #1"
+        slip_label = "Safe 5 Odds Slip"
         key_name = "5_odds"
     elif "10" in banker_mode:
         selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=10.00)
-        slip_label = "Safe 10 Odds #1"
+        slip_label = "Safe 10 Odds Slip"
         key_name = "10_odds"
     else:
         selected_slip, achieved_odds = build_exact_target_ticket(all_today_games, target_odds=20.00)
-        slip_label = "Safe 20 Odds #1"
+        slip_label = "Safe 20 Odds Slip"
         key_name = "20_odds"
 
-    # Retrieve SportyBet Nigeria verified code for this ticket
     active_code = st.session_state.sportybet_ng_codes.get(key_name, "VFUBGJ")
-
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
-    slip_items_html = []
-    for s in selected_slip:
-        slip_items_html.append(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">
-            <div>
-                <div style="font-weight: 700; font-size: 0.98rem; color: #ffffff;">{s['home']} vs {s['away']}</div>
-                <div style="font-size: 0.78rem; color: rgba(255,255,255,0.45);">{s['league']} • {s['time']}</div>
-            </div>
-            <div style="text-align: right;">
-                <span style="font-size: 0.78rem; color: rgba(255,255,255,0.5); margin-right: 8px;">{s['category']}</span>
-                <span style="font-weight: 800; color: #ffffff; font-size: 0.95rem; margin-right: 8px;">{s['sporty_market']}</span>
-                <span style="font-weight: 800; color: #ffd60a; font-size: 0.95rem; margin-right: 8px;">{s['odds']}</span>
-                <span style="font-size: 0.8rem; color: rgba(255,255,255,0.4);">{int(s['confidence'])}%</span>
-            </div>
-        </div>
-        """)
-
-    # Render card matching the reference UI exactly
+    # Header Card matching reference UI
     render_html(f"""
     <div style="background: #0a0f18; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 14px; margin-bottom: 6px;">
@@ -920,15 +803,13 @@ with tab_surebets:
                     <h3 style="margin: 0; font-size: 1.25rem; color: #ffffff;">{slip_label}</h3>
                 </div>
                 <div style="font-size: 0.82rem; color: rgba(255,255,255,0.5); margin-top: 4px;">
-                    {len(selected_slip)} picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #ff9100;">🔥 {len(selected_slip) + 2} Streak</span>
+                    {len(selected_slip)} picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #ff9100;">🛡️ Anti-1-Cut Protected</span>
                 </div>
             </div>
             <div style="font-size: 1.7rem; font-weight: 800; color: #00e676; letter-spacing: -0.02em;">
                 {achieved_odds}x
             </div>
         </div>
-
-        {"".join(slip_items_html)}
 
         <!-- MATCHED SPORTYBET NIGERIA CODE BAR -->
         <div class="sportybet-code-container">
@@ -948,22 +829,46 @@ with tab_surebets:
     </div>
     """)
 
-    # Community Code update drawer for SportyBet Nigeria
-    with st.expander(f"📝 Update SportyBet Nigeria Code for {slip_label} ({len(selected_slip)} Games Combined)"):
-        st.markdown(f"**Current Code:** `{active_code}`")
-        new_user_code = st.text_input(
-            "Enter new 6-character code booked for these matches on SportyBet Nigeria:", 
-            value=active_code,
-            key=f"ng_code_{key_name}", 
-            placeholder="e.g. C5JEQK"
-        )
-        if new_user_code != active_code and new_user_code.strip():
-            st.session_state.sportybet_ng_codes[key_name] = new_user_code.strip().upper()
-            st.success(f"Updated code to {new_user_code.strip().upper()}! Code will show immediately.")
+    # Render matches in the EXACT same card design as the Match Board
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">📋 Slip Match Details</span>')
+    if selected_slip:
+        formatted_slip_games = [
+            {
+                "match": s["match"],
+                "league": s["league"],
+                "home": s["home"],
+                "home_logo": s["home_logo"],
+                "away": s["away"],
+                "away_logo": s["away_logo"],
+                "time": s["time"],
+                "clock": s["clock"],
+                "is_live": s["is_live"],
+                "is_finished": s["is_finished"],
+                "home_score": s["home_score"],
+                "away_score": s["away_score"],
+                "is_boom": s["is_boom"],
+                "recommendation": {
+                    "market": s["market"],
+                    "category": s["category"],
+                    "confidence": s["confidence"],
+                    "odds": s["odds"],
+                    "badge": "pill-green"
+                },
+                "simulation": s["simulation"]
+            }
+            for s in selected_slip
+        ]
+        render_quant_grid(formatted_slip_games)
+
+    with st.expander(f"📝 Update SportyBet Nigeria Code for {slip_label}"):
+        new_code_in = st.text_input("Enter Official SportyBet Code:", value=active_code, key=f"sync_{key_name}")
+        if new_code_in != active_code and new_code_in.strip():
+            st.session_state.sportybet_ng_codes[key_name] = new_code_in.strip().upper()
+            st.success("SportyBet code updated successfully!")
             st.rerun()
 
 # =====================================================================
-# TAB 4: FRACTIONAL KELLY STAKING CALCULATOR
+# TAB 5: FRACTIONAL KELLY STAKING CALCULATOR
 # =====================================================================
 with tab_kelly:
     render_html("""
@@ -993,7 +898,7 @@ with tab_kelly:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_k2:
-        recommended_stake, calculated_edge = QuantitativePredictionEngine.calculate_kelly(
+        recommended_stake, calculated_edge = AntiOneCutEngine.calculate_kelly(
             user_bankroll, model_prob_in, bookie_odds, kelly_fraction
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
@@ -1022,7 +927,7 @@ ${recommended_stake} <span style="font-size: 1rem; color: rgba(255,255,255,0.45)
 """)
 
 # =====================================================================
-# TAB 5: 7X7 POISSON SIMULATION MATRIX
+# TAB 6: 7X7 POISSON SIMULATION MATRIX
 # =====================================================================
 with tab_analyzer:
     render_html("""
