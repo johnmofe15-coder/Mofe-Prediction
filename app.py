@@ -436,7 +436,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 3. LEAGUES DATA PIPELINE
+# 3. LEAGUES DATA PIPELINE (SCOTTISH PREMIERSHIP PERMANENTLY REMOVED)
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -455,7 +455,6 @@ ACTIVE_LEAGUES = [
     {"name": "Eredivisie (NED)", "code": "ned.1"},
     {"name": "Liga Portugal (POR)", "code": "por.1"},
     {"name": "Belgian Pro League (BEL)", "code": "bel.1"},
-    {"name": "Scottish Premiership (SCO)", "code": "sco.1"},
     {"name": "Süper Lig (TUR)", "code": "tur.1"},
     {"name": "Austrian Bundesliga (AUT)", "code": "aut.1"},
     {"name": "Swiss Super League (SUI)", "code": "sui.1"},
