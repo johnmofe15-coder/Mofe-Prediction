@@ -38,16 +38,17 @@ if "sportybet_ng_codes" not in st.session_state:
         "20_odds": "KFG5BM"
     }
 
-# Confirmed High-Yield Elite Teams for Over 1.5 Goals
+# Elite Goal-Scoring Powerhouses where Over 1.5 is mathematically solid
 ELITE_GOAL_TEAMS = {
     "Manchester City", "Arsenal", "Liverpool", "Bayern Munich", "Bayer Leverkusen",
     "Borussia Dortmund", "Real Madrid", "Barcelona", "Paris Saint-Germain", 
     "Inter Milan", "Atalanta", "Sporting CP", "Benfica", "Galatasaray", 
-    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt"
+    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt",
+    "Sanfrecce Hiroshima", "Vissel Kobe", "Kawasaki Frontale"
 }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION & CORNER ENGINE (ANTI-1-CUT PROTECTED)
+# 1. QUANTITATIVE PREDICTION & CORNER ENGINE (ANTI-TRAP ISOLATED)
 # =====================================================================
 class AntiOneCutEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -91,7 +92,6 @@ class AntiOneCutEngine:
 
         h_win, draw, a_win = 0.0, 0.0, 0.0
         ov_15, un_35, ov_25 = 0.0, 0.0, 0.0
-        home_ov_05, away_ov_05 = 0.0, 0.0
         ah_h_plus_15, ah_a_plus_15 = 0.0, 0.0
 
         for h in range(self.max_goals):
@@ -109,14 +109,12 @@ class AntiOneCutEngine:
                 if tot <= 3.5: un_35 += p
                 if tot > 2.5: ov_25 += p
 
-                if fin_h > 0.5: home_ov_05 += p
-                if fin_a > 0.5: away_ov_05 += p
-
                 if (fin_h + 1.5) > fin_a: ah_h_plus_15 += p
                 if (fin_a + 1.5) > fin_h: ah_a_plus_15 += p
 
         dc_1x = h_win + draw
         dc_x2 = a_win + draw
+        dc_12 = h_win + a_win
 
         non_draw = max(0.001, h_win + a_win)
         dnb_h = h_win / non_draw
@@ -126,25 +124,32 @@ class AntiOneCutEngine:
             "adj_home_xG": round(adj_h, 2),
             "adj_away_xG": round(adj_a, 2),
             "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
-            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1)},
+            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1), "12": round(dc_12 * 100, 1)},
             "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
             "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1), "Over_2_5": round(ov_25 * 100, 1)},
-            "Team_Goals": {"Home_Over_0_5": round(home_ov_05 * 100, 1), "Away_Over_0_5": round(away_ov_05 * 100, 1)},
             "Positive_AH": {"Home_Plus_1_5": round(ah_h_plus_15 * 100, 1), "Away_Plus_1_5": round(ah_a_plus_15 * 100, 1)}
         }
 
     def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str):
+        """
+        Anti-Trap Strategy:
+        - Team Over 0.5 is PERMANENTLY DELETED.
+        - Prioritizes Total Match Goals (where either team scoring wins the bet).
+        - Double Chance, DNB, and Under 3.5 Goal cushions.
+        """
         candidates = []
         is_elite_game = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
 
+        # 1. Total Match Over 1.5 (Either team scoring helps cash this)
         ov_15 = sim["Goals"]["Over_1_5"]
-        if is_elite_game and ov_15 >= 82.0:
+        if ov_15 >= 75.0:
             candidates.append({
                 "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
-                "category": "Elite Goals O/U", "confidence": ov_15,
+                "category": "Match Goals", "confidence": ov_15,
                 "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5"
             })
 
+        # 2. Double Chance (1X, X2, 12)
         dc = sim["DoubleChance"]
         if dc["1X"] >= 78.0:
             candidates.append({
@@ -159,6 +164,7 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2"
             })
 
+        # 3. Draw No Bet (DNB)
         dnb = sim["DNB"]
         if dnb["Home"] >= 68.0:
             candidates.append({
@@ -173,22 +179,16 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A"
             })
 
+        # 4. Under 3.5 Match Goals
         un_35 = sim["Goals"]["Under_3_5"]
         if un_35 >= 80.0:
             candidates.append({
                 "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
-                "category": "Safety Under", "confidence": un_35,
+                "category": "Match Goals", "confidence": un_35,
                 "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5"
             })
 
-        tg = sim["Team_Goals"]
-        if tg["Home_Over_0_5"] >= 86.0:
-            candidates.append({
-                "market": f"{home_name} Over 0.5 Team Goals", "sporty_market": f"{home_name} Over 0.5",
-                "category": "Team Goal", "confidence": tg["Home_Over_0_5"],
-                "odds": round((100.0 / tg["Home_Over_0_5"]) * 1.05, 2), "market_type": "HOME_OV_05"
-            })
-
+        # 5. Positive Asian Handicap (+1.5)
         ah = sim["Positive_AH"]
         if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
             if ah["Home_Plus_1_5"] >= 85.0:
@@ -205,10 +205,11 @@ class AntiOneCutEngine:
                     "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
                 })
 
+        # Rank all candidates purely by model certainty
         candidates.sort(key=lambda x: x["confidence"], reverse=True)
         primary_rec = candidates[0] if candidates else {
-            "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
-            "category": "Double Chance", "confidence": 76.0, "odds": 1.25, "market_type": "DC_1X"
+            "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
+            "category": "Match Goals", "confidence": 78.0, "odds": 1.25, "market_type": "OVER_1_5"
         }
 
         if primary_rec["confidence"] >= 89.0:
@@ -231,8 +232,6 @@ class AntiOneCutEngine:
         m_type = prediction.get("market_type", "")
 
         if m_type == "OVER_1_5" and total_goals >= 2:
-            return True
-        if m_type == "HOME_OV_05" and home_score >= 1:
             return True
         if state == "post":
             if m_type == "UNDER_3_5" and total_goals <= 3:
@@ -313,7 +312,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI LIQUID GLASS & NEW STREAMLINED SCORE CAPSULE
+# 2. UI LIQUID GLASS & SCORE CAPSULE STYLES
 # =====================================================================
 render_html("""
 <style>
@@ -366,7 +365,7 @@ render_html("""
         animation: pulse-boom 1.8s infinite;
     }
 
-    /* REDESIGNED SLEEK HORIZONTAL SCORE CAPSULE */
+    /* SLEEK NON-WRAPPING SCORE CAPSULE */
     .score-capsule {
         display: inline-flex;
         align-items: center;
@@ -630,7 +629,7 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Processing anti-1-cut models & verifying winning hits..."):
+with st.spinner("Processing anti-1-cut models (Team Over 0.5 Purged)..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -649,7 +648,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">Anti-1-Cut Engine Active</span>
+                <span class="glass-pill pill-cyan">Anti-1-Cut Active • Team Goal Trap Removed</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -668,7 +667,6 @@ tab_feed, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs
     "🔬 7x7 Simulation Matrix"
 ])
 
-# RENDER QUANT CARDS WITH THE SLEEK SCORE CAPSULE
 def render_quant_grid(match_list):
     cards_html = []
     for m in match_list:
@@ -684,7 +682,6 @@ def render_quant_grid(match_list):
         else:
             status_badge = f'<span class="glass-pill {rec["badge"]}">{rec["category"]}</span>'
 
-        # STREAMLINED NON-WRAPPING HORIZONTAL SCORE
         if m["is_live"] or m["is_finished"]:
             middle_display = f'<span class="score-capsule">{m["home_score"]} – {m["away_score"]}</span>'
         else:
@@ -766,7 +763,7 @@ with tab_sure89:
     <div style="margin-bottom: 16px;">
         <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 High-Certainty Vault: 89% & Above</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with anti-one-cut market protection.
+            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with anti-one-cut protection.
         </p>
     </div>
     """)
@@ -791,7 +788,7 @@ with tab_booms:
     if boom_fixtures:
         render_quant_grid(boom_fixtures)
     else:
-        st.info("Active matches are currently in progress. As soon as goals land, winning fixtures will be showcased here!")
+        st.info("Matches are in progress. As soon as goals land, winning fixtures will be showcased here!")
 
 # =====================================================================
 # TAB 4: SAFE BANKER HUB (MATCHES THE EXACT MATCH BOARD DESIGN)
@@ -807,9 +804,6 @@ with tab_surebets:
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Accumulator Hub</h2>
         </div>
     </div>
-    <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Engineered with anti-one-cut protection. Low-tier trap games use safety cushioning to avoid 1-0 defeats.
-    </p>
     """)
 
     banker_mode = st.radio(
@@ -839,7 +833,7 @@ with tab_surebets:
     active_code = st.session_state.sportybet_ng_codes.get(key_name, "VFUBGJ")
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
-    # Header Summary Card
+    # Header Card matching reference UI
     render_html(f"""
     <div style="background: #0a0f18; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 14px; margin-bottom: 6px;">
@@ -857,7 +851,7 @@ with tab_surebets:
             </div>
         </div>
 
-        <!-- SPORTYBET NIGERIA CODE BAR -->
+        <!-- MATCHED SPORTYBET NIGERIA CODE BAR -->
         <div class="sportybet-code-container">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 0.78rem; font-weight: 800; color: rgba(255,255,255,0.45); text-transform: uppercase;">CODE:</span>
