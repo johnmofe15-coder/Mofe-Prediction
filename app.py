@@ -137,7 +137,6 @@ class AntiOneCutEngine:
         candidates = []
         is_elite_game = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
 
-        # RULE 1: Over 1.5 strictly reserved for confirmed high-tempo elite teams
         ov_15 = sim["Goals"]["Over_1_5"]
         if is_elite_game and ov_15 >= 82.0:
             candidates.append({
@@ -146,7 +145,6 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5"
             })
 
-        # RULE 2: For regular/secondary fixtures, shift to protective Double Chance & DNB
         dc = sim["DoubleChance"]
         if dc["1X"] >= 78.0:
             candidates.append({
@@ -161,7 +159,6 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2"
             })
 
-        # Draw No Bet
         dnb = sim["DNB"]
         if dnb["Home"] >= 68.0:
             candidates.append({
@@ -176,7 +173,6 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A"
             })
 
-        # Under 3.5 Goals
         un_35 = sim["Goals"]["Under_3_5"]
         if un_35 >= 80.0:
             candidates.append({
@@ -185,7 +181,6 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5"
             })
 
-        # Team Goal Over 0.5
         tg = sim["Team_Goals"]
         if tg["Home_Over_0_5"] >= 86.0:
             candidates.append({
@@ -194,7 +189,6 @@ class AntiOneCutEngine:
                 "odds": round((100.0 / tg["Home_Over_0_5"]) * 1.05, 2), "market_type": "HOME_OV_05"
             })
 
-        # Asian Handicap (+1.5)
         ah = sim["Positive_AH"]
         if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
             if ah["Home_Plus_1_5"] >= 85.0:
@@ -319,7 +313,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI LIQUID GLASS STYLES
+# 2. UI LIQUID GLASS & NEW STREAMLINED SCORE CAPSULE
 # =====================================================================
 render_html("""
 <style>
@@ -372,16 +366,64 @@ render_html("""
         animation: pulse-boom 1.8s infinite;
     }
 
-    .live-score-badge {
-        display: inline-flex; align-items: center; justify-content: center;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.05) 100%);
-        border: 1px solid rgba(82, 229, 231, 0.4);
-        border-top: 1px solid rgba(255, 255, 255, 0.7);
-        border-radius: 10px; padding: 3px 12px;
+    /* REDESIGNED SLEEK HORIZONTAL SCORE CAPSULE */
+    .score-capsule {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 999px;
+        padding: 3px 14px;
         font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 1.15rem; font-weight: 800; color: #ffffff;
-        box-shadow: 0 0 16px rgba(82, 229, 231, 0.25);
-        min-width: 58px;
+        font-size: 1.05rem;
+        font-weight: 800;
+        color: #ffffff;
+        white-space: nowrap !important;
+        letter-spacing: 0.04em;
+        font-variant-numeric: tabular-nums;
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15), 0 2px 8px rgba(0, 0, 0, 0.35);
+        flex-shrink: 0;
+    }
+
+    .vs-separator {
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.3);
+        font-size: 0.8rem;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+    }
+
+    .match-team-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 12px 0;
+        gap: 8px;
+    }
+    .team-cell-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+    }
+    .team-cell-right {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+        text-align: right;
+    }
+    .team-name-text {
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: #ffffff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .sportybet-code-container {
@@ -444,7 +486,7 @@ render_html("""
     .pill-green { color: #30d158; background: rgba(48, 209, 88, 0.12); border: 1px solid rgba(48, 209, 88, 0.4); }
     .pill-gold { color: #ffd60a; background: rgba(255, 214, 10, 0.12); border: 1px solid rgba(255, 214, 10, 0.4); }
 
-    .team-logo { width: 32px; height: 32px; object-fit: contain; }
+    .team-logo { width: 30px; height: 30px; object-fit: contain; flex-shrink: 0; }
     .confidence-metric { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.85rem; font-weight: 800; color: #ffffff; }
     .hero-gradient-text {
         font-size: 2.2rem; letter-spacing: -0.035em;
@@ -626,6 +668,7 @@ tab_feed, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs
     "🔬 7x7 Simulation Matrix"
 ])
 
+# RENDER QUANT CARDS WITH THE SLEEK SCORE CAPSULE
 def render_quant_grid(match_list):
     cards_html = []
     for m in match_list:
@@ -641,30 +684,33 @@ def render_quant_grid(match_list):
         else:
             status_badge = f'<span class="glass-pill {rec["badge"]}">{rec["category"]}</span>'
 
+        # STREAMLINED NON-WRAPPING HORIZONTAL SCORE
         if m["is_live"] or m["is_finished"]:
-            middle_display = f'<span class="live-score-badge">{m["home_score"]} - {m["away_score"]}</span>'
+            middle_display = f'<span class="score-capsule">{m["home_score"]} – {m["away_score"]}</span>'
         else:
-            middle_display = '<span style="font-weight: 800; color: rgba(255,255,255,0.25); font-size: 0.8rem;">VS</span>'
+            middle_display = '<span class="vs-separator">VS</span>'
 
         cards_html.append(f"""
 <div class="liquid-glass-card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         {status_badge}
         <span style="font-size: 0.76rem; color: rgba(255,255,255,0.4);">{m['league']} • {m['time']}</span>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
-        <div style="display: flex; align-items: center; gap: 8px; width: 40%;">
+    
+    <div class="match-team-row">
+        <div class="team-cell-left">
             <img src="{m['home_logo']}" class="team-logo" loading="lazy" decoding="async"/>
-            <span style="font-size: 0.94rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{m['home']}</span>
+            <span class="team-name-text">{m['home']}</span>
         </div>
         <div>
             {middle_display}
         </div>
-        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 40%; text-align: right;">
-            <span style="font-size: 0.94rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{m['away']}</span>
+        <div class="team-cell-right">
+            <span class="team-name-text">{m['away']}</span>
             <img src="{m['away_logo']}" class="team-logo" loading="lazy" decoding="async"/>
         </div>
     </div>
+
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0;">
         <div class="prob-chip">
             <span style="color: rgba(255,255,255,0.4);">Home 1X</span><br>
@@ -793,7 +839,7 @@ with tab_surebets:
     active_code = st.session_state.sportybet_ng_codes.get(key_name, "VFUBGJ")
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
-    # Header Card matching reference UI
+    # Header Summary Card
     render_html(f"""
     <div style="background: #0a0f18; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 14px; margin-bottom: 6px;">
@@ -811,7 +857,7 @@ with tab_surebets:
             </div>
         </div>
 
-        <!-- MATCHED SPORTYBET NIGERIA CODE BAR -->
+        <!-- SPORTYBET NIGERIA CODE BAR -->
         <div class="sportybet-code-container">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 0.78rem; font-weight: 800; color: rgba(255,255,255,0.45); text-transform: uppercase;">CODE:</span>
