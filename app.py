@@ -38,15 +38,16 @@ if "sportybet_ng_codes" not in st.session_state:
         "20_odds": "KFG5BM"
     }
 
-# CONFIRMED HIGH-SCORING POWERHOUSES ONLY
+# High-tempo teams where Over 1.5 & Over 2.5 flourish
 ELITE_GOAL_TEAMS = {
     "Manchester City", "Arsenal", "Liverpool", "Bayern Munich", "Bayer Leverkusen",
     "Borussia Dortmund", "Real Madrid", "Barcelona", "Paris Saint-Germain", 
     "Inter Milan", "Atalanta", "Sporting CP", "Benfica", "Galatasaray", 
-    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt"
+    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt",
+    "Sanfrecce Hiroshima", "Vissel Kobe", "Kawasaki Frontale"
 }
 
-# LEAGUE SCORING FACTOR (Real average goals per match)
+# Real league average goals per match
 LEAGUE_TEMPO = {
     "ger.1": 3.20, "ned.1": 3.15, "nor.1": 3.05, "eng.1": 2.95,
     "bel.1": 2.85, "tur.1": 2.80, "ger.2": 2.90, "uefa.champions": 3.00,
@@ -55,9 +56,9 @@ LEAGUE_TEMPO = {
 }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION ENGINE (ANTI-DEADLOCK & ANTI-1-CUT)
+# 1. BALANCED PREDICTION ENGINE (SELECTIVE UNDER 3.5 & 4.5 GATING)
 # =====================================================================
-class AntiOneCutEngine:
+class BalancedPredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
         self.home_advantage = home_advantage
         self.max_goals = 7
@@ -98,9 +99,8 @@ class AntiOneCutEngine:
         matrix = np.outer(h_probs, a_probs)
 
         h_win, draw, a_win = 0.0, 0.0, 0.0
-        ov_15, un_15 = 0.0, 0.0
-        ov_25, un_25 = 0.0, 0.0
-        ov_35, un_35 = 0.0, 0.0
+        ov_15, ov_25 = 0.0, 0.0
+        un_25, un_35, un_45 = 0.0, 0.0, 0.0
         ah_h_plus_15, ah_a_plus_15 = 0.0, 0.0
 
         for h in range(self.max_goals):
@@ -115,13 +115,10 @@ class AntiOneCutEngine:
                 else: a_win += p
 
                 if tot > 1.5: ov_15 += p
-                else: un_15 += p
-
                 if tot > 2.5: ov_25 += p
-                else: un_25 += p
-
+                if tot <= 2.5: un_25 += p
                 if tot <= 3.5: un_35 += p
-                else: ov_35 += p
+                if tot <= 4.5: un_45 += p
 
                 if (fin_h + 1.5) > fin_a: ah_h_plus_15 += p
                 if (fin_a + 1.5) > fin_h: ah_a_plus_15 += p
@@ -139,93 +136,121 @@ class AntiOneCutEngine:
             "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
             "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1)},
             "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
-            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1), "Over_2_5": round(ov_25 * 100, 1), "Under_2_5": round(un_25 * 100, 1)},
+            "Goals": {
+                "Over_1_5": round(ov_15 * 100, 1), "Over_2_5": round(ov_25 * 100, 1),
+                "Under_2_5": round(un_25 * 100, 1), "Under_3_5": round(un_35 * 100, 1),
+                "Under_4_5": round(un_45 * 100, 1)
+            },
             "Positive_AH": {"Home_Plus_1_5": round(ah_h_plus_15 * 100, 1), "Away_Plus_1_5": round(ah_a_plus_15 * 100, 1)}
         }
 
-    def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str, league_code: str):
+    def evaluate_diverse_edge(self, sim: dict, corners: dict, home_name: str, away_name: str, league_code: str):
         """
-        ANTI-0-0 DEADLOCK AND ANTI-1-CUT SYSTEM:
-        - Completely purges Team Over 0.5.
-        - BANS Over 1.5 on low-tempo leagues or balanced mid-table matches.
-        - Only allows Over 1.5 if one of the teams is a verified powerhouse in an open league.
-        - In tactical/defensive matches, prioritizes Under 3.5, Double Chance, or DNB.
+        DIVERSE & BALANCED MARKET SELECTOR:
+        - Evaluates Over 1.5, Over 2.5, Double Chance, DNB, Positive AH, and selective Under 3.5/4.5.
+        - Under 3.5 & Under 4.5 are strictly restricted to games with low combined xG (<= 2.15).
+        - Edge ranking uses value-weighting to stop Under 3.5 from dominating every game.
         """
         candidates = []
-        is_elite = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
-        tempo = LEAGUE_TEMPO.get(league_code, 2.65)
         combined_xG = sim["adj_home_xG"] + sim["adj_away_xG"]
 
-        # RULE 1: STRICT OVER 1.5 GATING (Eliminates 0-0 cut traps like Dundee vs Hearts)
+        # 1. OVER 1.5 GOALS (Eligible when total expectation >= 2.10 goals)
         ov_15 = sim["Goals"]["Over_1_5"]
-        if is_elite and tempo >= 2.80 and combined_xG >= 2.60 and ov_15 >= 83.0:
+        if combined_xG >= 2.10 and ov_15 >= 73.0:
             candidates.append({
                 "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
-                "category": "Elite Goals O/U", "confidence": ov_15,
-                "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5"
+                "category": "Match Goals", "confidence": ov_15,
+                "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5",
+                "weight": ov_15 * 1.15  # Priority boost over defensive picks
             })
 
-        # RULE 2: UNDER 3.5 GOALS (The ultimate shield for tactical/defensive games)
-        un_35 = sim["Goals"]["Under_3_5"]
-        if combined_xG <= 2.90 and un_35 >= 78.0:
+        # 2. OVER 2.5 GOALS (For high-octane fixtures)
+        ov_25 = sim["Goals"]["Over_2_5"]
+        if combined_xG >= 2.85 and ov_25 >= 62.0:
             candidates.append({
-                "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
-                "category": "Safety Under", "confidence": un_35,
-                "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5"
+                "market": "Over 2.5 Goals", "sporty_market": "Over 2.5 Goals",
+                "category": "Match Goals", "confidence": ov_25,
+                "odds": round((100.0 / ov_25) * 1.08, 2), "market_type": "OVER_2_5",
+                "weight": ov_25 * 1.20
             })
 
-        # RULE 3: DOUBLE CHANCE (Covers 2 of 3 outcomes, immune to 0-0 if picked on favorite/draw)
+        # 3. DOUBLE CHANCE (1X / X2)
         dc = sim["DoubleChance"]
-        if dc["1X"] >= 78.0:
+        if dc["1X"] >= 76.0:
             candidates.append({
                 "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
                 "category": "Double Chance", "confidence": dc["1X"],
-                "odds": round((100.0 / dc["1X"]) * 1.05, 2), "market_type": "DC_1X"
+                "odds": round((100.0 / dc["1X"]) * 1.05, 2), "market_type": "DC_1X",
+                "weight": dc["1X"] * 1.10
             })
-        if dc["X2"] >= 78.0:
+        if dc["X2"] >= 76.0:
             candidates.append({
                 "market": f"{away_name} or Draw (X2)", "sporty_market": "Double Chance X2",
                 "category": "Double Chance", "confidence": dc["X2"],
-                "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2"
+                "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2",
+                "weight": dc["X2"] * 1.10
             })
 
-        # RULE 4: DRAW NO BET (Void refund on 0-0 or any tie)
+        # 4. DRAW NO BET (DNB)
         dnb = sim["DNB"]
         if dnb["Home"] >= 68.0:
             candidates.append({
                 "market": f"{home_name} (Draw No Bet)", "sporty_market": f"{home_name} DNB",
                 "category": "Draw No Bet", "confidence": dnb["Home"],
-                "odds": round((100.0 / dnb["Home"]) * 1.06, 2), "market_type": "DNB_H"
+                "odds": round((100.0 / dnb["Home"]) * 1.06, 2), "market_type": "DNB_H",
+                "weight": dnb["Home"] * 1.05
             })
         elif dnb["Away"] >= 68.0:
             candidates.append({
                 "market": f"{away_name} (Draw No Bet)", "sporty_market": f"{away_name} DNB",
                 "category": "Draw No Bet", "confidence": dnb["Away"],
-                "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A"
+                "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A",
+                "weight": dnb["Away"] * 1.05
             })
 
-        # RULE 5: POSITIVE ASIAN HANDICAP (+1.5)
+        # 5. SELECTIVE UNDER 3.5 & UNDER 4.5 (Only assigned to genuine low-goal grinds)
+        un_35 = sim["Goals"]["Under_3_5"]
+        un_45 = sim["Goals"]["Under_4_5"]
+        if combined_xG <= 2.15:  # Hard defense gating
+            if un_35 >= 80.0:
+                candidates.append({
+                    "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
+                    "category": "Defensive Grind", "confidence": un_35,
+                    "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5",
+                    "weight": un_35 * 0.92
+                })
+            elif un_45 >= 88.0:
+                candidates.append({
+                    "market": "Under 4.5 Goals", "sporty_market": "Under 4.5 Goals",
+                    "category": "Defensive Grind", "confidence": un_45,
+                    "odds": round((100.0 / un_45) * 1.04, 2), "market_type": "UNDER_4_5",
+                    "weight": un_45 * 0.90
+                })
+
+        # 6. POSITIVE ASIAN HANDICAP (+1.5)
         ah = sim["Positive_AH"]
         if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
             if ah["Home_Plus_1_5"] >= 85.0:
                 candidates.append({
                     "market": f"{home_name} (+1.5 Asian Handicap)", "sporty_market": f"{home_name} (+1.5 AH)",
                     "category": "Asian Handicap (+)", "confidence": ah["Home_Plus_1_5"],
-                    "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
+                    "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15",
+                    "weight": ah["Home_Plus_1_5"] * 1.02
                 })
         else:
             if ah["Away_Plus_1_5"] >= 85.0:
                 candidates.append({
                     "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
                     "category": "Asian Handicap (+)", "confidence": ah["Away_Plus_1_5"],
-                    "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
+                    "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15",
+                    "weight": ah["Away_Plus_1_5"] * 1.02
                 })
 
-        # Strict sorting: Highest certainty candidate becomes the primary pick
-        candidates.sort(key=lambda x: x["confidence"], reverse=True)
+        # Sort by dynamic balance weight so Under 3.5 doesn't crowd out the board
+        candidates.sort(key=lambda x: x.get("weight", x["confidence"]), reverse=True)
         primary_rec = candidates[0] if candidates else {
-            "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
-            "category": "Safety Under", "confidence": 78.0, "odds": 1.25, "market_type": "UNDER_3_5"
+            "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
+            "category": "Double Chance", "confidence": 76.0, "odds": 1.25, "market_type": "DC_1X"
         }
 
         if primary_rec["confidence"] >= 89.0:
@@ -249,8 +274,12 @@ class AntiOneCutEngine:
 
         if m_type == "OVER_1_5" and total_goals >= 2:
             return True
+        if m_type == "OVER_2_5" and total_goals >= 3:
+            return True
         if state == "post":
             if m_type == "UNDER_3_5" and total_goals <= 3:
+                return True
+            if m_type == "UNDER_4_5" and total_goals <= 4:
                 return True
             if m_type == "DC_1X" and home_score >= away_score:
                 return True
@@ -281,13 +310,13 @@ class AntiOneCutEngine:
         stake_amount = round(bankroll * fractional_kelly, 2)
         return stake_amount, round(edge * 100, 2)
 
-quant_engine = AntiOneCutEngine(home_advantage=1.15)
+quant_engine = BalancedPredictionEngine(home_advantage=1.15)
 
 def build_exact_target_ticket(all_matches: list, target_odds: float):
     all_picks = []
     for m in all_matches:
         for c in m["candidates"]:
-            if c["confidence"] >= 74.0:
+            if c["confidence"] >= 72.0:
                 all_picks.append({
                     "match": m["match"],
                     "home": m["home"],
@@ -328,7 +357,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI LIQUID GLASS & SCORE CAPSULE STYLES
+# 2. UI LIQUID GLASS & NON-WRAPPING SCORE CAPSULES
 # =====================================================================
 render_html("""
 <style>
@@ -518,7 +547,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 3. LEAGUES DATA PIPELINE (SCOTLAND BANNED TO PREVENT 0-0 TRAPS)
+# 3. LEAGUES DATA PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -596,7 +625,6 @@ def fetch_single_league(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            # REAL STATS ENGINE: Reads league tempo and team records directly from ESPN API
             tempo = LEAGUE_TEMPO.get(league["code"], 2.65)
             h_power = 1.35 if h_name in ELITE_GOAL_TEAMS else 1.15
             a_power = 1.25 if a_name in ELITE_GOAL_TEAMS else 0.95
@@ -608,7 +636,7 @@ def fetch_single_league(args) -> list:
             a_c_lmbda = 3.6 + ((len(a_name) % 4) / 2.0)
             corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
 
-            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name, league["code"])
+            rec, candidates = quant_engine.evaluate_diverse_edge(sim, corner_sim, h_name, a_name, league["code"])
             is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
@@ -646,7 +674,7 @@ def fetch_all_fixtures(target_date: date):
         flat.extend(r)
     return flat
 
-with st.spinner("Calibrating anti-0-0 deadlock algorithms & league tempo..."):
+with st.spinner("Balancing markets & checking high-scoring powerhouses..."):
     all_today_games = fetch_all_fixtures(date.today())
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -665,7 +693,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">Anti-1-Cut Active • Scotland Banned</span>
+                <span class="glass-pill pill-cyan">Balanced Multi-Market Engine</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -679,7 +707,7 @@ tab_feed, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs
     f"⚡ Match Board ({len(all_today_games)})", 
     f"💎 Sure Fixtures ≥89% ({len([m for m in all_today_games if m['recommendation']['confidence'] >= 89.0])})",
     f"💥 Boomed Today ({len(boom_fixtures)})",
-    "🎯 Safe Banker Hub (Anti-Cut)", 
+    "🎯 Safe Banker Hub", 
     "💰 Kelly Bankroll Calculator", 
     "🔬 7x7 Simulation Matrix"
 ])
@@ -739,8 +767,8 @@ def render_quant_grid(match_list):
             <b style="color: #52e5e7;">{sim['Goals']['Over_1_5']}%</b>
         </div>
         <div class="prob-chip">
-            <span style="color: rgba(255,255,255,0.4);">Under 3.5</span><br>
-            <b style="color: #30d158;">{sim['Goals']['Under_3_5']}%</b>
+            <span style="color: rgba(255,255,255,0.4);">Over 2.5</span><br>
+            <b style="color: #c084fc;">{sim['Goals']['Over_2_5']}%</b>
         </div>
     </div>
     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.06); margin: 10px 0;">
@@ -763,7 +791,7 @@ def render_quant_grid(match_list):
 # =====================================================================
 with tab_feed:
     sorted_all_games = sorted(all_today_games, key=lambda x: x["recommendation"]["confidence"], reverse=True)
-    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ DAILY OPTIMAL MATCH BOARD</span>')
+    render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S DIVERSE MATCH BOARD (GOALS, DOUBLE CHANCE, DNB, AH)</span>')
     if sorted_all_games:
         render_quant_grid(sorted_all_games)
     else:
@@ -780,7 +808,7 @@ with tab_sure89:
     <div style="margin-bottom: 16px;">
         <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 High-Certainty Vault: 89% & Above</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with anti-one-cut market protection.
+            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold across diverse balanced markets.
         </p>
     </div>
     """)
@@ -822,7 +850,7 @@ with tab_surebets:
         </div>
     </div>
     <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.6); margin-bottom: 14px;">
-        Engineered with anti-one-cut protection. Low-tier trap games use safety cushioning to avoid 1-0 defeats.
+        Slips compounded across balanced, non-volatile markets: <b>Over 1.5, Over 2.5, Double Chance, DNB, and Selective Unders</b>.
     </p>
     """)
 
@@ -863,7 +891,7 @@ with tab_surebets:
                     <h3 style="margin: 0; font-size: 1.25rem; color: #ffffff;">{slip_label}</h3>
                 </div>
                 <div style="font-size: 0.82rem; color: rgba(255,255,255,0.5); margin-top: 4px;">
-                    {len(selected_slip)} picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #ff9100;">🛡️ Anti-1-Cut Protected</span>
+                    {len(selected_slip)} picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #ff9100;">🛡️ Multi-Market Balanced</span>
                 </div>
             </div>
             <div style="font-size: 1.7rem; font-weight: 800; color: #00e676; letter-spacing: -0.02em;">
@@ -889,7 +917,6 @@ with tab_surebets:
     </div>
     """)
 
-    # Render matches in the EXACT same card design as the Match Board
     render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">📋 Slip Match Details</span>')
     if selected_slip:
         formatted_slip_games = [
@@ -958,7 +985,7 @@ with tab_kelly:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_k2:
-        recommended_stake, calculated_edge = AntiOneCutEngine.calculate_kelly(
+        recommended_stake, calculated_edge = BalancedPredictionEngine.calculate_kelly(
             user_bankroll, model_prob_in, bookie_odds, kelly_fraction
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
@@ -1049,6 +1076,6 @@ with tab_analyzer:
 """)
 
         with col_m2:
-            st.info("Anti-Cut simulation matrix active.")
+            st.info("Simulation matrix active.")
     else:
         st.info("Select a fixture to inspect.")
