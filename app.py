@@ -3,7 +3,7 @@ import requests
 from requests.adapters import HTTPAdapter
 import math
 import numpy as np
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(
@@ -21,11 +21,11 @@ def render_html(html_str: str):
 @st.cache_resource
 def get_http_session() -> requests.Session:
     session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=65, pool_maxsize=65, max_retries=2)
+    adapter = HTTPAdapter(pool_connections=40, pool_maxsize=40, max_retries=3)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*"
     })
     return session
@@ -47,7 +47,7 @@ LEAGUE_TEMPO = {
 }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION ENGINE (LOCKED TO 3 MARKETS ONLY)
+# 1. QUANTITATIVE PREDICTION ENGINE (3 MARKETS ONLY)
 # =====================================================================
 class ExclusiveThreeMarketEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -101,18 +101,10 @@ class ExclusiveThreeMarketEngine:
         }
 
     def evaluate_locked_markets(self, sim: dict, home_name: str, away_name: str):
-        """
-        STRICTLY RESTRICTED TO:
-        1. Double Chance (1X, X2, 12)
-        2. Over 1.5 Goals
-        3. Over 0.5 Goals
-        Uses value-weighting so Over 0.5 does not override higher-yield Double Chance and Over 1.5.
-        """
         candidates = []
 
-        # 1. OVER 1.5 GOALS (Target priority for balance & value)
         ov_15 = sim["Goals"]["Over_1_5"]
-        if ov_15 >= 70.0:
+        if ov_15 >= 68.0:
             odds_15 = round((100.0 / ov_15) * 1.06, 2)
             candidates.append({
                 "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
@@ -121,9 +113,8 @@ class ExclusiveThreeMarketEngine:
                 "priority_score": (ov_15 / 100.0) * (odds_15 ** 1.8) * 1.35
             })
 
-        # 2. DOUBLE CHANCE (1X, X2, 12)
         dc = sim["DoubleChance"]
-        if dc["1X"] >= 72.0:
+        if dc["1X"] >= 70.0:
             odds_1x = round((100.0 / dc["1X"]) * 1.05, 2)
             candidates.append({
                 "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
@@ -131,7 +122,7 @@ class ExclusiveThreeMarketEngine:
                 "odds": odds_1x, "market_type": "DC_1X",
                 "priority_score": (dc["1X"] / 100.0) * (odds_1x ** 1.8) * 1.25
             })
-        if dc["X2"] >= 72.0:
+        if dc["X2"] >= 70.0:
             odds_x2 = round((100.0 / dc["X2"]) * 1.05, 2)
             candidates.append({
                 "market": f"{away_name} or Draw (X2)", "sporty_market": "Double Chance X2",
@@ -139,7 +130,7 @@ class ExclusiveThreeMarketEngine:
                 "odds": odds_x2, "market_type": "DC_X2",
                 "priority_score": (dc["X2"] / 100.0) * (odds_x2 ** 1.8) * 1.25
             })
-        if dc["12"] >= 76.0:
+        if dc["12"] >= 74.0:
             odds_12 = round((100.0 / dc["12"]) * 1.05, 2)
             candidates.append({
                 "market": "Any Team to Win (12)", "sporty_market": "Double Chance 12",
@@ -148,9 +139,8 @@ class ExclusiveThreeMarketEngine:
                 "priority_score": (dc["12"] / 100.0) * (odds_12 ** 1.8) * 1.15
             })
 
-        # 3. OVER 0.5 GOALS (Acts as ultra-safe anchor, but balanced against over-domination)
         ov_05 = sim["Goals"]["Over_0_5"]
-        if ov_05 >= 88.0:
+        if ov_05 >= 86.0:
             odds_05 = round((100.0 / ov_05) * 1.05, 2)
             candidates.append({
                 "market": "Over 0.5 Match Goals", "sporty_market": "Over 0.5 Goals",
@@ -159,7 +149,6 @@ class ExclusiveThreeMarketEngine:
                 "priority_score": (ov_05 / 100.0) * (odds_05 ** 1.1) * 0.95
             })
 
-        # Sort by value-weighted priority score to provide balanced variety
         candidates.sort(key=lambda x: x["priority_score"], reverse=True)
         primary_rec = candidates[0] if candidates else {
             "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
@@ -218,7 +207,7 @@ class ExclusiveThreeMarketEngine:
 quant_engine = ExclusiveThreeMarketEngine(home_advantage=1.15)
 
 # =====================================================================
-# 2. EXACT-TARGET ACCUMULATOR SOLVER (3 MARKETS ONLY)
+# 2. EXACT-TARGET ACCUMULATOR BUILDER
 # =====================================================================
 def build_exact_target_ticket(candidate_matches: list, target_odds: float):
     all_picks = []
@@ -226,8 +215,7 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
         if m["is_finished"]:
             continue
         for c in m["candidates"]:
-            # Baseline certainty for the ticket candidates
-            if c["confidence"] >= 68.0:
+            if c["confidence"] >= 65.0:
                 all_picks.append({
                     "match": m["match"],
                     "home": m["home"],
@@ -250,7 +238,6 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
                     "simulation": m["simulation"]
                 })
 
-    # Sort candidates by combined edge and odds to prevent leg-count inflation
     all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
     selected = []
     used_matches = set()
@@ -266,7 +253,6 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
         if current_odds >= target_odds:
             break
 
-    # If exceeding target by more than 35%, prune low-odds picks to keep odds tight to the target
     if current_odds > (target_odds * 1.35) and len(selected) > 3:
         for i in range(len(selected) - 1, -1, -1):
             cand = selected[i]
@@ -279,7 +265,7 @@ def build_exact_target_ticket(candidate_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 3. UI LIQUID GLASS STYLES
+# 3. UI STYLING & CLEAN CARD ARCHITECTURE
 # =====================================================================
 render_html("""
 <style>
@@ -469,11 +455,10 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. ACTIVE LEAGUES PIPELINE
+# 4. ROBUST DATA FETCHING PIPELINE (MULTI-ENDPOINT FALLBACK)
 # =====================================================================
-ACTIVE_LEAGUES = [
+LEAGUES_CONFIG = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
-    {"name": "Championship (ENG)", "code": "eng.2"},
     {"name": "La Liga (ESP)", "code": "esp.1"},
     {"name": "Serie A (ITA)", "code": "ita.1"},
     {"name": "Bundesliga (GER)", "code": "ger.1"},
@@ -486,11 +471,9 @@ ACTIVE_LEAGUES = [
     {"name": "Belgian Pro League (BEL)", "code": "bel.1"},
     {"name": "Süper Lig (TUR)", "code": "tur.1"},
     {"name": "Austrian Bundesliga (AUT)", "code": "aut.1"},
-    {"name": "Swiss Super League (SUI)", "code": "sui.1"},
-    {"name": "Superliga (DEN)", "code": "den.1"},
+    {"name": "Championship (ENG)", "code": "eng.2"},
     {"name": "2. Bundesliga (GER)", "code": "ger.2"},
     {"name": "Serie B (ITA)", "code": "ita.2"},
-    {"name": "League One (ENG)", "code": "eng.3"},
     {"name": "Major League Soccer (USA)", "code": "usa.1"},
     {"name": "Liga MX (MEX)", "code": "mex.1"},
     {"name": "Saudi Pro League (KSA)", "code": "sau.1"},
@@ -498,96 +481,138 @@ ACTIVE_LEAGUES = [
     {"name": "Norwegian Eliteserien (NOR)", "code": "nor.1"}
 ]
 
-def fetch_single_league(args) -> list:
+def parse_espn_event(event, league_name, league_code):
+    try:
+        comp = event.get("competitions", [{}])[0]
+        competitors = comp.get("competitors", [])
+        home = next((c for c in competitors if c.get("homeAway") == "home"), {})
+        away = next((c for c in competitors if c.get("homeAway") == "away"), {})
+
+        h_name = home.get("team", {}).get("displayName", "Home")
+        a_name = away.get("team", {}).get("displayName", "Away")
+
+        status_obj = event.get("status", {})
+        status_type = status_obj.get("type", {})
+        state = status_type.get("state", "pre")
+        is_live = (state == "in")
+        is_finished = (state == "post")
+
+        raw_clock = status_obj.get("displayClock", "")
+        detail_str = status_type.get("detail", "Scheduled")
+        
+        home_score = int(home.get("score", 0)) if (is_live or is_finished) else 0
+        away_score = int(away.get("score", 0)) if (is_live or is_finished) else 0
+
+        raw_date = event.get("date", "")
+        match_time = "TBD"
+        if raw_date:
+            try:
+                dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                match_time = dt.strftime("%H:%M GMT")
+            except:
+                match_time = raw_date[11:16] + " GMT"
+
+        tempo = LEAGUE_TEMPO.get(league_code, 2.70)
+        h_power = 1.30 if any(t in h_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter"]) else 1.10
+        a_power = 1.20 if any(t in a_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter"]) else 0.95
+        raw_h_xG = (tempo / 2.0) * h_power
+        raw_a_xG = (tempo / 2.0) * a_power
+
+        sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, live_h=0, live_a=0, mins_left=90.0)
+        rec, candidates = quant_engine.evaluate_locked_markets(sim, h_name, a_name)
+        is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
+
+        default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
+        return {
+            "match": f"{h_name} vs {a_name}",
+            "league": league_name,
+            "home": h_name,
+            "home_logo": home.get("team", {}).get("logo", default_logo),
+            "away": a_name,
+            "away_logo": away.get("team", {}).get("logo", default_logo),
+            "time": match_time,
+            "state": state,
+            "is_live": is_live,
+            "is_finished": is_finished,
+            "clock": detail_str if is_live else ("FT" if is_finished else match_time),
+            "home_score": home_score,
+            "away_score": away_score,
+            "is_boom": is_boom,
+            "recommendation": rec,
+            "candidates": candidates,
+            "simulation": sim
+        }
+    except Exception:
+        return None
+
+def fetch_single_league(args):
     league, date_str = args
     session = get_http_session()
-    url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league['code']}/scoreboard?dates={date_str}"
-    
     matches = []
-    try:
-        res = session.get(url, timeout=2.8)
-        if res.status_code != 200:
-            return matches
-
-        events = res.json().get("events", [])
-        for event in events:
-            comp = event.get("competitions", [{}])[0]
-            competitors = comp.get("competitors", [])
-            home = next((c for c in competitors if c.get("homeAway") == "home"), {})
-            away = next((c for c in competitors if c.get("homeAway") == "away"), {})
-
-            h_name = home.get("team", {}).get("displayName", "Home")
-            a_name = away.get("team", {}).get("displayName", "Away")
-
-            status_obj = event.get("status", {})
-            status_type = status_obj.get("type", {})
-            state = status_type.get("state", "pre")
-            is_live = (state == "in")
-            is_finished = (state == "post")
-
-            raw_clock = status_obj.get("displayClock", "")
-            detail_str = status_type.get("detail", "Scheduled")
-            
-            home_score = int(home.get("score", 0)) if (is_live or is_finished) else 0
-            away_score = int(away.get("score", 0)) if (is_live or is_finished) else 0
-
-            raw_date = event.get("date", "")
-            match_time = "TBD"
-            if raw_date:
-                try:
-                    dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
-                    match_time = dt.strftime("%H:%M GMT")
-                except:
-                    match_time = raw_date[11:16] + " GMT"
-
-            # Pre-match baseline odds
-            tempo = LEAGUE_TEMPO.get(league["code"], 2.65)
-            h_power = 1.35 if h_name in ELITE_GOAL_TEAMS else 1.15
-            a_power = 1.25 if a_name in ELITE_GOAL_TEAMS else 0.95
-            raw_h_xG = (tempo / 2.0) * (h_power / 1.15)
-            raw_a_xG = (tempo / 2.0) * (a_power / 1.15)
-
-            sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, live_h=0, live_a=0, mins_left=90.0)
-            rec, candidates = quant_engine.evaluate_locked_markets(sim, h_name, a_name)
-            is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
-
-            default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
-            matches.append({
-                "match": f"{h_name} vs {a_name}",
-                "league": league["name"],
-                "home": h_name,
-                "home_logo": home.get("team", {}).get("logo", default_logo),
-                "away": a_name,
-                "away_logo": away.get("team", {}).get("logo", default_logo),
-                "time": match_time,
-                "state": state,
-                "is_live": is_live,
-                "is_finished": is_finished,
-                "clock": detail_str if is_live else ("FT" if is_finished else match_time),
-                "home_score": home_score,
-                "away_score": away_score,
-                "is_boom": is_boom,
-                "recommendation": rec,
-                "candidates": candidates,
-                "simulation": sim
-            })
-    except Exception:
-        pass
+    
+    # 1. Primary league scoreboard
+    urls = [
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league['code']}/scoreboard?dates={date_str}",
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league['code']}/scoreboard"
+    ]
+    for url in urls:
+        try:
+            res = session.get(url, timeout=4.5)
+            if res.status_code == 200:
+                events = res.json().get("events", [])
+                for ev in events:
+                    parsed = parse_espn_event(ev, league["name"], league["code"])
+                    if parsed:
+                        matches.append(parsed)
+                if matches:
+                    break
+        except Exception:
+            continue
     return matches
 
-@st.cache_data(ttl=60, show_spinner=False)
-def fetch_all_fixtures(target_date: date):
-    date_str = target_date.strftime("%Y%m%d")
-    tasks = [(l, date_str) for l in ACTIVE_LEAGUES]
-    with ThreadPoolExecutor(max_workers=28) as executor:
+@st.cache_data(ttl=90, show_spinner=False)
+def fetch_all_fixtures():
+    session = get_http_session()
+    today_str = date.today().strftime("%Y%m%d")
+    tomorrow_str = (date.today() + timedelta(days=1)).strftime("%Y%m%d")
+    
+    tasks = [(l, today_str) for l in LEAGUES_CONFIG]
+    with ThreadPoolExecutor(max_workers=14) as executor:
         results = executor.map(fetch_single_league, tasks)
+        
     flat = []
-    for r in results:
-        flat.extend(r)
+    seen_matches = set()
+    for match_list in results:
+        for m in match_list:
+            if m["match"] not in seen_matches:
+                seen_matches.add(m["match"])
+                flat.append(m)
+
+    # 2. Master Universal Fallback if specific leagues return few games
+    if len(flat) < 5:
+        fallback_urls = [
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboards?dates={today_str}",
+            f"https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboards?dates={tomorrow_str}",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/scoreboards"
+        ]
+        for f_url in fallback_urls:
+            try:
+                res = session.get(f_url, timeout=5.0)
+                if res.status_code == 200:
+                    events = res.json().get("events", [])
+                    for ev in events:
+                        c_name = ev.get("competitions", [{}])[0].get("league", {}).get("name", "Soccer League")
+                        parsed = parse_espn_event(ev, c_name, "general")
+                        if parsed and parsed["match"] not in seen_matches:
+                            seen_matches.add(parsed["match"])
+                            flat.append(parsed)
+            except Exception:
+                continue
+
     return flat
 
-with st.spinner("Locking selections to Double Chance, Over 1.5 & Over 0.5..."):
-    all_today_games = fetch_all_fixtures(date.today())
+with st.spinner("Connecting to live match streams and calculating 3 locked markets..."):
+    all_today_games = fetch_all_fixtures()
     upcoming_games = [m for m in all_today_games if not m["is_finished"]]
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
@@ -704,7 +729,7 @@ def render_quant_grid(match_list):
 # TAB 1: DAILY MATCH BOARD
 # =====================================================================
 with tab_feed:
-    show_upcoming_only = st.checkbox("Show only upcoming games (hide finished full-time matches)", value=True)
+    show_upcoming_only = st.checkbox("Show only upcoming & live games (hide finished full-time matches)", value=False)
     board_display_list = upcoming_games if show_upcoming_only else all_today_games
     sorted_board = sorted(board_display_list, key=lambda x: x["recommendation"]["confidence"], reverse=True)
     
@@ -712,10 +737,10 @@ with tab_feed:
     if sorted_board:
         render_quant_grid(sorted_board)
     else:
-        st.info("No fixtures to display.")
+        st.info("No fixtures found for today. Matches will appear once live fixtures are loaded.")
 
 # =====================================================================
-# TAB 2: STAKE THIS GAME (EXACT 10X VAULT - 3 MARKETS ONLY)
+# TAB 2: STAKE THIS GAME (EXACT 10X VAULT)
 # =====================================================================
 with tab_stake_game:
     render_html("""
@@ -733,7 +758,7 @@ with tab_stake_game:
     </p>
     """)
 
-    stake_slip, stake_odds = build_exact_target_ticket(upcoming_games, target_odds=10.00)
+    stake_slip, stake_odds = build_exact_target_ticket(upcoming_games if upcoming_games else all_today_games, target_odds=10.00)
     stake_code = st.session_state.sportybet_ng_codes.get("stake_this_game", "STAKE10")
     stake_avg_conf = round(sum(s["confidence"] for s in stake_slip) / max(1, len(stake_slip)), 2) if stake_slip else 0.0
 
@@ -801,27 +826,27 @@ with tab_stake_game:
                 st.rerun()
 
 # =====================================================================
-# TAB 3: SURE FIXTURES ≥ 89% (UPCOMING MATCHES ONLY)
+# TAB 3: SURE FIXTURES ≥ 89% (UPCOMING MATCHES)
 # =====================================================================
 with tab_sure89:
-    sure_upcoming_89 = [m for m in upcoming_games if m["recommendation"]["confidence"] >= 89.0]
+    sure_upcoming_89 = [m for m in (upcoming_games if upcoming_games else all_today_games) if m["recommendation"]["confidence"] >= 89.0]
     sure_upcoming_89.sort(key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
     render_html("""
     <div style="margin-bottom: 16px;">
-        <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 Upcoming Sure Fixtures: 89% & Above</h2>
+        <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 High-Certainty Vault: 89% & Above</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            Only shows upcoming matches playing today that have NOT started or finished yet.
+            Matches meeting the strict ≥ 89.0% probability threshold across Double Chance, Over 1.5, and Over 0.5 Goals.
         </p>
     </div>
     """)
     if sure_upcoming_89:
         render_quant_grid(sure_upcoming_89)
     else:
-        st.info("No upcoming fixtures meeting the ≥ 89.0% threshold right now. European matches will appear here once loaded!")
+        st.info("No fixtures meeting the ≥ 89.0% threshold right now.")
 
 # =====================================================================
-# TAB 4: BOOMED TODAY (DEDICATED SHOWCASE)
+# TAB 4: BOOMED TODAY (DEDICATED FULL-TIME RESULTS SHOWCASE)
 # =====================================================================
 with tab_booms:
     render_html("""
@@ -864,20 +889,22 @@ with tab_surebets:
         label_visibility="collapsed"
     )
 
+    feed_pool = upcoming_games if upcoming_games else all_today_games
+
     if "3" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=3.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(feed_pool, target_odds=3.00)
         slip_label = "Safe 3 Odds Slip"
         key_name = "3_odds"
     elif "5" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=5.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(feed_pool, target_odds=5.00)
         slip_label = "Safe 5 Odds Slip"
         key_name = "5_odds"
     elif "10" in banker_mode:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=10.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(feed_pool, target_odds=10.00)
         slip_label = "Safe 10 Odds Slip"
         key_name = "10_odds"
     else:
-        selected_slip, achieved_odds = build_exact_target_ticket(upcoming_games, target_odds=20.00)
+        selected_slip, achieved_odds = build_exact_target_ticket(feed_pool, target_odds=20.00)
         slip_label = "Safe 20 Odds Slip"
         key_name = "20_odds"
 
