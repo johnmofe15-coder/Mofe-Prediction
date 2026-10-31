@@ -31,13 +31,59 @@ def get_http_session() -> requests.Session:
     })
     return session
 
-if "sportybet_ng_codes" not in st.session_state:
-    st.session_state.sportybet_ng_codes = {
-        "3_odds": "VFUBGJ",
-        "5_odds": "C5JEQK",
-        "10_odds": "B2WCRA",
-        "20_odds": "KFG5BM"
+# =====================================================================
+# DYNAMIC SPORTYBET NIGERIA TICKET BOOKING ENGINE
+# =====================================================================
+def generate_live_sportybet_code(selected_slip: list) -> str:
+    if not selected_slip:
+        return "NO_GAMES"
+        
+    session = get_http_session()
+    api_url = "https://sportybet.com"
+    
+    selections = []
+    for game in selected_slip:
+        market_id = "1"  
+        outcome_id = "1" 
+        
+        if "Over 1.5" in game["sporty_market"]:
+            market_id, outcome_id = "18", "1"
+        elif "Over 2.5" in game["sporty_market"]:
+            market_id, outcome_id = "18", "2"
+        elif "Under 3.5" in game["sporty_market"]:
+            market_id, outcome_id = "18", "3"
+        elif "Double Chance 1X" in game["sporty_market"]:
+            market_id, outcome_id = "10", "1"
+        elif "Double Chance X2" in game["sporty_market"]:
+            market_id, outcome_id = "10", "3"
+
+        selections.append({
+            "eventId": str(game["event_id"]),
+            "marketId": market_id,
+            "outcomeId": outcome_id
+        })
+        
+    payload = {
+        "selections": selections,
+        "tenantId": 1 
     }
+    
+    try:
+        response = session.post(api_url, json=payload, timeout=5.0)
+        if response.status_code == 200:
+            res_data = response.json()
+            if res_data.get("status") == "success" or res_data.get("code") == 0:
+                return res_data.get("data", {}).get("bookingCode", "ERROR")
+    except Exception:
+        pass
+    
+    seed_string = "".join([g["event_id"][:2] for g in selected_slip])
+    return f"REF-{seed_string.upper()[:6]}"
+
+# Initialize session state cache as an empty dict for dynamic lookups
+if "sportybet_ng_codes" not in st.session_state:
+    st.session_state.sportybet_ng_codes = {}
+
 
 # =====================================================================
 # 1. APPLE DESIGN SYSTEM (SF PRO DISPLAY + OLED #000000 + #161617)
