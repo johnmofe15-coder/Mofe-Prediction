@@ -25,23 +25,60 @@ def get_http_session() -> requests.Session:
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*"
     })
     return session
 
-# Persistent active SportyBet Nigeria booking codes
-if "sportybet_ng_codes" not in st.session_state:
-    st.session_state.sportybet_ng_codes = {
-        "board_master": "VFUBGJ",
-        "stake_5": "C5JEQK",
-        "stake_10": "B2WCRA",
-        "stake_20": "KFG5BM",
-        "3_odds": "VFUBGJ",
-        "5_odds": "C5JEQK",
-        "10_odds": "B2WCRA",
-        "20_odds": "KFG5BM"
-    }
+# =====================================================================
+# CLOUD SYNC DATABASE (JSONBIN INTEGRATION)
+# =====================================================================
+DEFAULT_CODES = {
+    "board_master": "VFUBGJ",
+    "stake_5": "C5JEQK",
+    "stake_10": "B2WCRA",
+    "stake_20": "KFG5BM",
+    "3_odds": "VFUBGJ",
+    "5_odds": "C5JEQK",
+    "10_odds": "B2WCRA",
+    "20_odds": "KFG5BM"
+}
+
+def get_synced_codes() -> dict:
+    bin_id = st.secrets.get("JSONBIN_BIN_ID")
+    api_key = st.secrets.get("JSONBIN_API_KEY")
+
+    if not bin_id or not api_key:
+        return st.session_state.get("local_sporty_codes", DEFAULT_CODES)
+
+    headers = {"X-Master-Key": api_key}
+    try:
+        res = requests.get(f"https://api.jsonbin.io/v3/b/{bin_id}/latest", headers=headers, timeout=3.5)
+        if res.status_code == 200:
+            record = res.json().get("record", {})
+            st.session_state["local_sporty_codes"] = record
+            return record
+    except Exception:
+        pass
+    return st.session_state.get("local_sporty_codes", DEFAULT_CODES)
+
+def update_synced_code(key_name: str, code_val: str):
+    current = get_synced_codes()
+    current[key_name] = code_val.strip().upper()
+    st.session_state["local_sporty_codes"] = current
+
+    bin_id = st.secrets.get("JSONBIN_BIN_ID")
+    api_key = st.secrets.get("JSONBIN_API_KEY")
+
+    if bin_id and api_key:
+        headers = {
+            "Content-Type": "application/json",
+            "X-Master-Key": api_key
+        }
+        try:
+            requests.put(f"https://api.jsonbin.io/v3/b/{bin_id}", json=current, headers=headers, timeout=3.5)
+        except Exception:
+            pass
 
 LEAGUE_TEMPO = {
     "ger.1": 3.20, "ned.1": 3.15, "nor.1": 3.05, "eng.1": 2.95,
@@ -65,23 +102,6 @@ class AntiOneCutEngine:
         k_range = np.arange(max_range)
         k_fact = np.array([math.factorial(i) for i in range(max_range)], dtype=np.float64)
         return (np.exp(-lmbda) * (lmbda ** k_range)) / k_fact
-
-    def simulate_corners(self, h_lmbda: float, a_lmbda: float) -> dict:
-        max_c = 18
-        h_prob = self._poisson_vector(h_lmbda, max_c)
-        a_prob = self._poisson_vector(a_lmbda, max_c)
-        c_matrix = np.outer(h_prob, a_prob)
-        c_grid = np.add.outer(np.arange(max_c), np.arange(max_c))
-
-        ov_75 = float(c_matrix[c_grid > 7.5].sum())
-        ov_85 = float(c_matrix[c_grid > 8.5].sum())
-        un_115 = float(c_matrix[c_grid <= 11.5].sum())
-        return {
-            "projected_total": round(h_lmbda + a_lmbda, 1),
-            "Over_7_5": round(ov_75 * 100, 1),
-            "Over_8_5": round(ov_85 * 100, 1),
-            "Under_11_5": round(un_115 * 100, 1)
-        }
 
     def simulate_match(self, h_xG: float, a_xG: float, live_h: int = 0, live_a: int = 0, mins_left: float = 90.0) -> dict:
         tf = max(0.05, min(1.0, mins_left / 90.0))
@@ -129,7 +149,7 @@ class AntiOneCutEngine:
             "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_1_5": round(un_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1)}
         }
 
-    def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str):
+    def evaluate_anti_one_cut(self, sim: dict, home_name: str, away_name: str):
         candidates = []
 
         ov_15 = sim["Goals"]["Over_1_5"]
@@ -253,8 +273,9 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
         if m["is_finished"]:
             continue
         for c in m["candidates"]:
-            if c["confidence"] >= 72.0:
+            if c["confidence"] >= 70.0:
                 all_picks.append({
+                    "event_id": str(m.get("event_id", "")),
                     "match": m["match"],
                     "home": m["home"],
                     "away": m["away"],
@@ -273,6 +294,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
                     "category": c["category"],
                     "confidence": c["confidence"],
                     "odds": c["odds"],
+                    "market_type": c.get("market_type", "OVER_1_5"),
                     "simulation": m["simulation"]
                 })
 
@@ -303,7 +325,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI STYLING
+# 2. UI STYLING & CLEAN CARD ARCHITECTURE
 # =====================================================================
 render_html("""
 <style>
@@ -493,7 +515,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. ACTIVE LEAGUES PIPELINE
+# 3. LEAGUES DATA PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -564,23 +586,18 @@ def fetch_single_league(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
+            seed = sum(ord(c) for c in (h_name + a_name))
             tempo = LEAGUE_TEMPO.get(league["code"], 2.70)
-            h_power = 1.30 if any(t in h_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter", "Liverpool", "Leverkusen"]) else 1.10
-            a_power = 1.20 if any(t in a_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter", "Liverpool", "Leverkusen"]) else 0.95
-            raw_h_xG = (tempo / 2.0) * h_power
-            raw_a_xG = (tempo / 2.0) * a_power
+            raw_h_xG = (tempo / 2.0) * 1.15
+            raw_a_xG = (tempo / 2.0) * 0.95
 
             sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, home_score, away_score, 90.0)
-            h_c_lmbda = 4.8 + ((len(h_name) % 4) / 2.0)
-            a_c_lmbda = 3.6 + ((len(a_name) % 4) / 2.0)
-            corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
-
-            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name)
+            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, h_name, a_name)
             is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
             matches.append({
-                "event_id": str(event.get("id", "0")),
+                "event_id": str(event.get("id", str(seed))),
                 "match": f"{h_name} vs {a_name}",
                 "league": league["name"],
                 "home": h_name,
@@ -618,14 +635,17 @@ def fetch_all_fixtures():
                 flat.append(m)
     return flat
 
-with st.spinner("Streaming fixtures & compiling SportyBet Nigeria master codes..."):
+with st.spinner("Connecting to live match streams and retrieving cloud-synced SportyBet codes..."):
     all_today_games = fetch_all_fixtures()
     upcoming_games = [m for m in all_today_games if not m["is_finished"]]
     live_fixtures = [m for m in all_today_games if m["is_live"]]
     boom_fixtures = [m for m in all_today_games if m["is_boom"]]
 
+    # Load synced codes from JSONBin
+    synced_codes = get_synced_codes()
+
 # =====================================================================
-# 5. APP HEADER & CONTROLS
+# 4. APP HEADER & CONTROLS
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} LIVE</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else '<span class="glass-pill pill-green">💥 Verifying Results</span>'
@@ -638,7 +658,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">SportyBet Nigeria Multi-Slip Integration Active</span>
+                <span class="glass-pill pill-cyan">SportyBet Cloud-Sync Engine Active</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -740,8 +760,7 @@ with tab_feed:
     board_display_list = upcoming_games if show_upcoming_only else all_today_games
     sorted_board = sorted(board_display_list, key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
-    # Active Master Code for the entire board
-    active_board_code = st.session_state.sportybet_ng_codes.get("board_master", "VFUBGJ")
+    active_board_code = synced_codes.get("board_master", "VFUBGJ")
 
     render_html(f"""
     <div style="background: #0d121d; border: 1.5px solid #00e676; border-radius: 14px; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; box-shadow: 0 0 20px rgba(0, 230, 118, 0.15);">
@@ -763,10 +782,11 @@ with tab_feed:
     </div>
     """)
 
-    with st.expander("📝 Update Official SportyBet Nigeria Code for Full Board"):
-        new_b_code = st.text_input("Enter Code:", value=active_board_code, key="sync_board_code")
+    with st.expander("📝 Cloud-Sync SportyBet Nigeria Code for Full Board"):
+        new_b_code = st.text_input("Enter Active Code (Saves across all devices):", value=active_board_code, key="sync_board_code")
         if new_b_code != active_board_code and new_b_code.strip():
-            st.session_state.sportybet_ng_codes["board_master"] = new_b_code.strip().upper()
+            update_synced_code("board_master", new_b_code)
+            st.success("Synced to cloud!")
             st.rerun()
 
     render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S MATCH BOARD</span>')
@@ -811,7 +831,7 @@ with tab_stake_this:
         slip_label = "Stake This: Master 20 Odds"
         storage_key = "stake_20"
 
-    stake_code = st.session_state.sportybet_ng_codes.get(storage_key, "VFUBGJ")
+    stake_code = synced_codes.get(storage_key, "VFUBGJ")
     avg_stake_conf = round(sum(s["confidence"] for s in stake_slip) / max(1, len(stake_slip)), 2) if stake_slip else 0.0
 
     render_html(f"""
@@ -831,7 +851,6 @@ with tab_stake_this:
             </div>
         </div>
 
-        <!-- SportyBet Multi-Code Bar -->
         <div class="sportybet-code-container">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 0.78rem; font-weight: 800; color: rgba(255,255,255,0.45); text-transform: uppercase;">CODE:</span>
@@ -871,10 +890,11 @@ with tab_stake_this:
         with st.expander(f"📋 Copy Betslip Selections ({len(stake_slip)} Games)"):
             st.text_area("Selections:", value=stake_slip_text, height=120)
 
-    with st.expander(f"📝 Update SportyBet Nigeria Code for {slip_label}"):
-        new_code_val = st.text_input("Enter Official Code:", value=stake_code, key=f"stake_sync_{storage_key}")
+    with st.expander(f"📝 Cloud-Sync SportyBet Nigeria Code for {slip_label}"):
+        new_code_val = st.text_input("Enter Official Code (Saves across all devices):", value=stake_code, key=f"stake_sync_{storage_key}")
         if new_code_val != stake_code and new_code_val.strip():
-            st.session_state.sportybet_ng_codes[storage_key] = new_code_val.strip().upper()
+            update_synced_code(storage_key, new_code_val)
+            st.success("Synced to cloud!")
             st.rerun()
 
 # =====================================================================
@@ -958,7 +978,7 @@ with tab_surebets:
         slip_label = "Safe 20 Odds Slip"
         key_name = "20_odds"
 
-    active_code = st.session_state.sportybet_ng_codes.get(key_name, "VFUBGJ")
+    active_code = synced_codes.get(key_name, "VFUBGJ")
     avg_conf = round(sum(s["confidence"] for s in selected_slip) / max(1, len(selected_slip)), 2) if selected_slip else 0.0
 
     render_html(f"""
@@ -1010,11 +1030,11 @@ with tab_surebets:
         ]
         render_quant_grid(formatted_slip_games)
 
-    with st.expander(f"📝 Update SportyBet Nigeria Code for {slip_label}"):
-        new_code_in = st.text_input("Enter Official SportyBet Code:", value=active_code, key=f"sync_{key_name}")
+    with st.expander(f"📝 Cloud-Sync SportyBet Nigeria Code for {slip_label}"):
+        new_code_in = st.text_input("Enter Official SportyBet Code (Saves across all devices):", value=active_code, key=f"sync_{key_name}")
         if new_code_in != active_code and new_code_in.strip():
-            st.session_state.sportybet_ng_codes[key_name] = new_code_in.strip().upper()
-            st.success("SportyBet code updated successfully!")
+            update_synced_code(key_name, new_code_in)
+            st.success("Synced to cloud!")
             st.rerun()
 
 # =====================================================================
