@@ -67,7 +67,7 @@ def get_http_session() -> requests.Session:
     })
     return session
 
-# Initialize Dynamic Code Mapping System (Step 4 Block)
+# Initialize Dynamic Code Mapping System
 if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
         "3_odds": "PENDING",
@@ -235,8 +235,8 @@ class AntiOneCutEngine:
                     "category": "Asian Handicap (+)", "confidence": ah["Home_Plus_1_5"],
                     "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
                 })
+        else:
 Use code with caution.
-else:
 if ah["Away_Plus_1_5"] >= 85.0:
 candidates.append({
 "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
@@ -250,7 +250,7 @@ primary_rec = candidates[0] if candidates else {
 }
 if primary_rec["confidence"] >= 89.0:
 primary_rec["badge"] = "pill-green"
-primary_rec["tier"] = "Ultra Banker (≥89%)"
+primary_rec["tier"] = "Ultra Banker (>=89%)"
 elif primary_rec["confidence"] >= 80.0:
 primary_rec["badge"] = "pill-cyan"
 primary_rec["tier"] = "Solid Edge"
@@ -682,7 +682,7 @@ Apex Quantitative Analytics
 """)
 tab_feed, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
 f"⚡ Match Board ({len(all_today_games)})",
-f"💎 Sure Fixtures ≥89% ({len([m for m in all_today_games if m['recommendation']['confidence'] >= 89.0])})",
+f"💎 Sure Fixtures >=89% ({len([m for m in all_today_games if m['recommendation']['confidence'] >= 89.0])})",
 f"💥 Boomed Today ({len(boom_fixtures)})",
 "🎯 Safe Banker Hub (Anti-Cut)",
 "💰 Kelly Bankroll Calculator",
@@ -777,7 +777,7 @@ st.info("No fixtures found for today.")
 =====================================================================
 
 
-TAB 2: SURE FIXTURES ≥ 89% (DEDICATED SECTION)
+TAB 2: SURE FIXTURES >= 89% (DEDICATED SECTION)
 
 
 =====================================================================
@@ -789,14 +789,14 @@ render_html("""
 
 💎 High-Certainty Vault: 89% & Above
 
-Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with anti-one-cut market protection.
+Exclusively isolates games meeting the strict >= 89.0% probability threshold with anti-one-cut market protection.
 
 
 """)
 if sure_games_89:
 render_quant_grid(sure_games_89)
 else:
-st.info("No fixtures currently meet the ≥ 89.0% threshold today.")
+st.info("No fixtures currently meet the >= 89.0% threshold today.")
 
 =====================================================================
 
