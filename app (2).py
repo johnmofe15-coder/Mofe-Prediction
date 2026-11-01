@@ -999,7 +999,7 @@ ${recommended_stake} ({stake_pct}%)
 =====================================================================
 
 
-TAB 6: 7X7 POISSON SIMULATION MATRIX
+# TAB 6: 7X7 POISSON SIMULATION MATRIX
 
 
 =====================================================================
