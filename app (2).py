@@ -26,7 +26,7 @@ def fetch_live_sportybet_code(selected_slip_games):
         
     url = "https://betrelay.com.ng" 
     headers = {
-        "Authorization": "Bearer YOUR_REAL_BETRELAY_API_KEY_HERE",
+        "Authorization": "br_test_HkGxkhqGb6vTTAhLFxX4RTKM9kaB3Ih5PpCcUn9N",
         "Content-Type": "application/json"
     }
     
