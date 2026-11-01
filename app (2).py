@@ -244,7 +244,7 @@ candidates.append({
 "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
 })
 candidates.sort(key=lambda x: x["confidence"], reverse=True)
-primary_rec = candidates[0] if candidates else {
+primary_rec = candidates if candidates else {
 "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
 "category": "Double Chance", "confidence": 76.0, "odds": 1.25, "market_type": "DC_1X"
 }
