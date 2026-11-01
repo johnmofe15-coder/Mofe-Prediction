@@ -236,7 +236,7 @@ class AntiOneCutEngine:
                     "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
                 })
         else:
-Use code with caution.
+
 if ah["Away_Plus_1_5"] >= 85.0:
 candidates.append({
 "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
