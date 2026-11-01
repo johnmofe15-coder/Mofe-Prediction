@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 from requests.adapters import HTTPAdapter
 import math
+import json
+import os
 import numpy as np
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
@@ -25,12 +27,32 @@ def get_http_session() -> requests.Session:
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*"
     })
     return session
 
-# Persistent active SportyBet Nigeria booking codes
+# =====================================================================
+# IMMUTABLE PREDICTION LOCK VAULT (STOPS RETROACTIVE PICK SWITCHING)
+# =====================================================================
+DB_FILE = "locked_predictions.json"
+
+def load_locked_vault() -> dict:
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_locked_vault(vault: dict):
+    try:
+        with open(DB_FILE, "w") as f:
+            json.dump(vault, f, indent=2)
+    except Exception:
+        pass
+
 if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
         "board_master": "VFUBGJ",
@@ -51,9 +73,9 @@ LEAGUE_TEMPO = {
 }
 
 # =====================================================================
-# 1. QUANTITATIVE PREDICTION ENGINE (ANTI-1-CUT PROTECTED)
+# 1. PURE PRE-MATCH MATHEMATICAL POISSON ENGINE
 # =====================================================================
-class AntiOneCutEngine:
+class LockedPredictionEngine:
     def __init__(self, home_advantage: float = 1.15):
         self.home_advantage = home_advantage
         self.max_goals = 7
@@ -66,50 +88,28 @@ class AntiOneCutEngine:
         k_fact = np.array([math.factorial(i) for i in range(max_range)], dtype=np.float64)
         return (np.exp(-lmbda) * (lmbda ** k_range)) / k_fact
 
-    def simulate_corners(self, h_lmbda: float, a_lmbda: float) -> dict:
-        max_c = 18
-        h_prob = self._poisson_vector(h_lmbda, max_c)
-        a_prob = self._poisson_vector(a_lmbda, max_c)
-        c_matrix = np.outer(h_prob, a_prob)
-        c_grid = np.add.outer(np.arange(max_c), np.arange(max_c))
-
-        ov_75 = float(c_matrix[c_grid > 7.5].sum())
-        ov_85 = float(c_matrix[c_grid > 8.5].sum())
-        un_115 = float(c_matrix[c_grid <= 11.5].sum())
-        return {
-            "projected_total": round(h_lmbda + a_lmbda, 1),
-            "Over_7_5": round(ov_75 * 100, 1),
-            "Over_8_5": round(ov_85 * 100, 1),
-            "Under_11_5": round(un_115 * 100, 1)
-        }
-
-    def simulate_match(self, h_xG: float, a_xG: float, live_h: int = 0, live_a: int = 0, mins_left: float = 90.0) -> dict:
-        tf = max(0.05, min(1.0, mins_left / 90.0))
-        adj_h = max(0.1, h_xG * self.home_advantage * tf)
-        adj_a = max(0.1, a_xG * tf)
+    def simulate_pre_match(self, h_xG: float, a_xG: float) -> dict:
+        """Pure pre-match simulation calculated strictly at 0-0 before kickoff."""
+        adj_h = max(0.1, h_xG * self.home_advantage)
+        adj_a = max(0.1, a_xG)
 
         h_probs = self._poisson_vector(adj_h, self.max_goals)
         a_probs = self._poisson_vector(adj_a, self.max_goals)
         matrix = np.outer(h_probs, a_probs)
 
         h_win, draw, a_win = 0.0, 0.0, 0.0
-        ov_15, un_15 = 0.0, 0.0
-        un_35 = 0.0
+        ov_15, un_35 = 0.0, 0.0
 
         for h in range(self.max_goals):
             for a in range(self.max_goals):
                 p = matrix[h][a]
-                fin_h = live_h + h
-                fin_a = live_a + a
-                tot = fin_h + fin_a
+                tot = h + a
 
-                if fin_h > fin_a: h_win += p
-                elif fin_h == fin_a: draw += p
+                if h > a: h_win += p
+                elif h == a: draw += p
                 else: a_win += p
 
                 if tot > 1.5: ov_15 += p
-                else: un_15 += p
-
                 if tot <= 3.5: un_35 += p
 
         dc_1x = h_win + draw
@@ -126,10 +126,10 @@ class AntiOneCutEngine:
             "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
             "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1), "12": round(dc_12 * 100, 1)},
             "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
-            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_1_5": round(un_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1)}
+            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1)}
         }
 
-    def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str):
+    def generate_immutable_prediction(self, sim: dict, home_name: str, away_name: str):
         candidates = []
 
         ov_15 = sim["Goals"]["Over_1_5"]
@@ -159,13 +159,13 @@ class AntiOneCutEngine:
                 "odds": odds_x2, "market_type": "DC_X2",
                 "score": dc["X2"] * (odds_x2 ** 1.35)
             })
-        if dc["12"] >= 75.0:
+        if dc["12"] >= 76.0:
             odds_12 = round((100.0 / dc["12"]) * 1.05, 2)
             candidates.append({
                 "market": "Any Team to Win (12)", "sporty_market": "Double Chance 12",
                 "category": "Double Chance", "confidence": dc["12"],
                 "odds": odds_12, "market_type": "DC_12",
-                "score": dc["12"] * (odds_12 ** 1.25)
+                "score": dc["12"] * (odds_12 ** 1.20)
             })
 
         dnb = sim["DNB"]
@@ -187,46 +187,45 @@ class AntiOneCutEngine:
             })
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
-        primary_rec = candidates[0] if candidates else {
+        primary = candidates[0] if candidates else {
             "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
             "category": "Match Goals", "confidence": 75.0, "odds": 1.25, "market_type": "OVER_1_5"
         }
 
-        if primary_rec["confidence"] >= 89.0:
-            primary_rec["badge"] = "pill-green"
-            primary_rec["tier"] = "Ultra Banker (≥89%)"
-        elif primary_rec["confidence"] >= 80.0:
-            primary_rec["badge"] = "pill-cyan"
-            primary_rec["tier"] = "Solid Edge"
-        else:
-            primary_rec["badge"] = "pill-gold"
-            primary_rec["tier"] = "Quant Pick"
-
-        return primary_rec, candidates
+        primary["badge"] = "pill-green" if primary["confidence"] >= 88.0 else ("pill-cyan" if primary["confidence"] >= 78.0 else "pill-gold")
+        return primary, candidates
 
     @staticmethod
-    def check_boom_status(prediction: dict, home_score: int, away_score: int, state: str) -> bool:
+    def evaluate_settlement(prediction: dict, home_score: int, away_score: int, state: str) -> str:
+        """Truthful settlement: Never alters the pick. Accurately labels BOOM or CUT."""
         if not prediction:
-            return False
+            return "PENDING"
+        
         total_goals = home_score + away_score
         m_type = prediction.get("market_type", "")
 
+        # Early win triggers during the match
         if m_type == "OVER_1_5" and total_goals >= 2:
-            return True
+            return "BOOM"
+
+        # Final settlement at full time
         if state == "post":
-            if m_type == "UNDER_3_5" and total_goals <= 3:
-                return True
-            if m_type == "DC_1X" and home_score >= away_score:
-                return True
-            if m_type == "DC_X2" and away_score >= home_score:
-                return True
-            if m_type == "DC_12" and home_score != away_score:
-                return True
-            if m_type == "DNB_H" and home_score > away_score:
-                return True
-            if m_type == "DNB_A" and away_score > home_score:
-                return True
-        return False
+            if m_type == "OVER_1_5":
+                return "BOOM" if total_goals >= 2 else "CUT"
+            if m_type == "DC_1X":
+                return "BOOM" if home_score >= away_score else "CUT"
+            if m_type == "DC_X2":
+                return "BOOM" if away_score >= home_score else "CUT"
+            if m_type == "DC_12":
+                return "BOOM" if home_score != away_score else "CUT"
+            if m_type == "DNB_H":
+                return "BOOM" if home_score > away_score else ("PUSH" if home_score == away_score else "CUT")
+            if m_type == "DNB_A":
+                return "BOOM" if away_score > home_score else ("PUSH" if home_score == away_score else "CUT")
+            if m_type == "UNDER_3_5":
+                return "BOOM" if total_goals <= 3 else "CUT"
+
+        return "PENDING"
 
     @staticmethod
     def calculate_kelly(bankroll: float, model_prob: float, bookmaker_odds: float, fraction: float = 0.25):
@@ -245,36 +244,36 @@ class AntiOneCutEngine:
         stake_amount = round(bankroll * fractional_kelly, 2)
         return stake_amount, round(edge * 100, 2)
 
-quant_engine = AntiOneCutEngine(home_advantage=1.15)
+quant_engine = LockedPredictionEngine(home_advantage=1.15)
 
 def build_exact_target_ticket(all_matches: list, target_odds: float):
     all_picks = []
     for m in all_matches:
         if m["is_finished"]:
             continue
-        for c in m["candidates"]:
-            if c["confidence"] >= 72.0:
-                all_picks.append({
-                    "match": m["match"],
-                    "home": m["home"],
-                    "away": m["away"],
-                    "home_logo": m["home_logo"],
-                    "away_logo": m["away_logo"],
-                    "home_score": m["home_score"],
-                    "away_score": m["away_score"],
-                    "is_live": m["is_live"],
-                    "is_finished": m["is_finished"],
-                    "clock": m["clock"],
-                    "is_boom": m["is_boom"],
-                    "league": m["league"],
-                    "time": m["time"],
-                    "market": c["market"],
-                    "sporty_market": c["sporty_market"],
-                    "category": c["category"],
-                    "confidence": c["confidence"],
-                    "odds": c["odds"],
-                    "simulation": m["simulation"]
-                })
+        rec = m["recommendation"]
+        if rec["confidence"] >= 68.0:
+            all_picks.append({
+                "match": m["match"],
+                "home": m["home"],
+                "away": m["away"],
+                "home_logo": m["home_logo"],
+                "away_logo": m["away_logo"],
+                "home_score": m["home_score"],
+                "away_score": m["away_score"],
+                "is_live": m["is_live"],
+                "is_finished": m["is_finished"],
+                "clock": m["clock"],
+                "settlement": m["settlement"],
+                "league": m["league"],
+                "time": m["time"],
+                "market": rec["market"],
+                "sporty_market": rec["sporty_market"],
+                "category": rec["category"],
+                "confidence": rec["confidence"],
+                "odds": rec["odds"],
+                "simulation": m["simulation"]
+            })
 
     all_picks.sort(key=lambda x: (x["confidence"] * math.sqrt(x["odds"])), reverse=True)
     selected = []
@@ -303,7 +302,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 2. UI STYLING
+# 2. UI STYLING & STATUS BADGES
 # =====================================================================
 render_html("""
 <style>
@@ -354,6 +353,22 @@ render_html("""
         box-shadow: 0 0 14px rgba(48, 209, 88, 0.6);
         border: 1px solid #34d399;
         animation: pulse-boom 1.8s infinite;
+    }
+
+    .cut-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+        color: #ffffff !important;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        padding: 3px 10px;
+        border-radius: 9999px;
+        box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
+        border: 1px solid #f87171;
     }
 
     .score-capsule {
@@ -493,7 +508,7 @@ render_html("""
 """)
 
 # =====================================================================
-# 4. ACTIVE LEAGUES PIPELINE
+# 3. LEAGUES DATA PIPELINE
 # =====================================================================
 ACTIVE_LEAGUES = [
     {"name": "Premier League (ENG)", "code": "eng.1"},
@@ -534,6 +549,9 @@ def fetch_single_league(args) -> list:
             return matches
 
         events = res.json().get("events", [])
+        locked_vault = load_locked_vault()
+        vault_modified = False
+
         for event in events:
             comp = event.get("competitions", [{}])[0]
             competitors = comp.get("competitors", [])
@@ -542,6 +560,7 @@ def fetch_single_league(args) -> list:
 
             h_name = home.get("team", {}).get("displayName", "Home")
             a_name = away.get("team", {}).get("displayName", "Away")
+            event_id = str(event.get("id", f"{h_name}_{a_name}_{date_str}"))
 
             status_obj = event.get("status", {})
             status_type = status_obj.get("type", {})
@@ -564,23 +583,36 @@ def fetch_single_league(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            tempo = LEAGUE_TEMPO.get(league["code"], 2.70)
-            h_power = 1.30 if any(t in h_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter", "Liverpool", "Leverkusen"]) else 1.10
-            a_power = 1.20 if any(t in a_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter", "Liverpool", "Leverkusen"]) else 0.95
-            raw_h_xG = (tempo / 2.0) * h_power
-            raw_a_xG = (tempo / 2.0) * a_power
+            # IMMUTABLE PREDICTION CHECK:
+            # If match was already simulated pre-match, use the exact locked prediction.
+            # Never recalculate on live/finished games to avoid changing picks.
+            if event_id in locked_vault:
+                rec = locked_vault[event_id]["recommendation"]
+                sim = locked_vault[event_id]["simulation"]
+                candidates = locked_vault[event_id]["candidates"]
+            else:
+                tempo = LEAGUE_TEMPO.get(league["code"], 2.70)
+                raw_h_xG = (tempo / 2.0) * 1.15
+                raw_a_xG = (tempo / 2.0) * 0.95
+                # Pre-match 0-0 baseline only
+                sim = quant_engine.simulate_pre_match(raw_h_xG, raw_a_xG)
+                rec, candidates = quant_engine.generate_immutable_prediction(sim, h_name, a_name)
+                
+                # Freeze into persistent vault
+                locked_vault[event_id] = {
+                    "match": f"{h_name} vs {a_name}",
+                    "recommendation": rec,
+                    "simulation": sim,
+                    "candidates": candidates,
+                    "date": date_str
+                }
+                vault_modified = True
 
-            sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, home_score, away_score, 90.0)
-            h_c_lmbda = 4.8 + ((len(h_name) % 4) / 2.0)
-            a_c_lmbda = 3.6 + ((len(a_name) % 4) / 2.0)
-            corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
-
-            rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name)
-            is_boom = quant_engine.check_boom_status(rec, home_score, away_score, state)
+            settlement = quant_engine.evaluate_settlement(rec, home_score, away_score, state)
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
             matches.append({
-                "event_id": str(event.get("id", "0")),
+                "event_id": event_id,
                 "match": f"{h_name} vs {a_name}",
                 "league": league["name"],
                 "home": h_name,
@@ -594,11 +626,15 @@ def fetch_single_league(args) -> list:
                 "clock": detail_str if is_live else ("FT" if is_finished else match_time),
                 "home_score": home_score,
                 "away_score": away_score,
-                "is_boom": is_boom,
+                "settlement": settlement,
                 "recommendation": rec,
                 "candidates": candidates,
                 "simulation": sim
             })
+
+        if vault_modified:
+            save_locked_vault(locked_vault)
+
     except Exception:
         pass
     return matches
@@ -618,14 +654,15 @@ def fetch_all_fixtures():
                 flat.append(m)
     return flat
 
-with st.spinner("Streaming fixtures & compiling SportyBet Nigeria master codes..."):
+with st.spinner("Streaming matches & reading immutable predictions..."):
     all_today_games = fetch_all_fixtures()
     upcoming_games = [m for m in all_today_games if not m["is_finished"]]
     live_fixtures = [m for m in all_today_games if m["is_live"]]
-    boom_fixtures = [m for m in all_today_games if m["is_boom"]]
+    boom_fixtures = [m for m in all_today_games if m["settlement"] == "BOOM"]
+    cut_fixtures = [m for m in all_today_games if m["settlement"] == "CUT"]
 
 # =====================================================================
-# 5. APP HEADER & CONTROLS
+# 4. APP HEADER & CONTROLS
 # =====================================================================
 live_count_pill = f'<span class="live-pill"><span class="live-dot"></span>{len(live_fixtures)} LIVE</span>' if live_fixtures else '<span class="glass-pill pill-cyan">⚡ 0 In-Play</span>'
 boom_count_pill = f'<span class="boom-badge">💥 {len(boom_fixtures)} BOOMS RECORDED</span>' if boom_fixtures else '<span class="glass-pill pill-green">💥 Verifying Results</span>'
@@ -638,7 +675,7 @@ render_html(f"""
         </div>
         <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="glass-pill pill-cyan">SportyBet Nigeria Multi-Slip Integration Active</span>
+                <span class="glass-pill pill-cyan">Immutable Pre-Match Predictions Active</span>
                 {live_count_pill}
                 {boom_count_pill}
             </div>
@@ -648,11 +685,12 @@ render_html(f"""
 </div>
 """)
 
-tab_feed, tab_stake_this, tab_sure89, tab_booms, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
+tab_feed, tab_stake_this, tab_sure89, tab_booms, tab_cuts, tab_surebets, tab_kelly, tab_analyzer = st.tabs([
     f"⚡ Match Board ({len(all_today_games)})", 
     "🔥 Stake This Game",
     f"💎 Sure Fixtures ≥89% ({len([m for m in (upcoming_games if upcoming_games else all_today_games) if m['recommendation']['confidence'] >= 89.0])})",
     f"💥 Boomed Today ({len(boom_fixtures)})",
+    f"❌ Cuts / Lost ({len(cut_fixtures)})",
     "🎯 Safe Banker Hub", 
     "💰 Kelly Bankroll Calculator", 
     "🔬 7x7 Simulation Matrix"
@@ -663,9 +701,12 @@ def render_quant_grid(match_list):
     for m in match_list:
         sim = m["simulation"]
         rec = m["recommendation"]
+        settlement = m.get("settlement", "PENDING")
 
-        if m["is_boom"]:
+        if settlement == "BOOM":
             status_badge = '<span class="boom-badge">💥 BOOM VERIFIED</span>'
+        elif settlement == "CUT":
+            status_badge = '<span class="cut-badge">❌ CUT (LOST)</span>'
         elif m["is_live"]:
             status_badge = f'<span class="live-pill"><span class="live-dot"></span>{m["clock"]}</span>'
         elif m["is_finished"]:
@@ -724,7 +765,7 @@ def render_quant_grid(match_list):
             <div style="font-size: 0.94rem; font-weight: 700; color: #ffffff;">{rec['market']}</div>
         </div>
         <div style="text-align: right;">
-            <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Certainty</div>
+            <div style="font-size: 0.68rem; text-transform: uppercase; color: rgba(255,255,255,0.4);">Locked Certainty</div>
             <div class="confidence-metric" style="color: {'#30d158' if rec['confidence'] >= 89.0 else '#ffffff'};">{rec['confidence']}%</div>
         </div>
     </div>
@@ -740,7 +781,6 @@ with tab_feed:
     board_display_list = upcoming_games if show_upcoming_only else all_today_games
     sorted_board = sorted(board_display_list, key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
-    # Active Master Code for the entire board
     active_board_code = st.session_state.sportybet_ng_codes.get("board_master", "VFUBGJ")
 
     render_html(f"""
@@ -781,10 +821,10 @@ with tab_feed:
 with tab_stake_this:
     render_html("""
     <div style="margin-bottom: 18px;">
-        <span class="glass-pill pill-green">Official High-Certainty Picks</span>
+        <span class="glass-pill pill-green">Locked Pre-Match Predictions</span>
         <h2 style="margin: 8px 0 4px 0; font-size: 1.6rem; color: #ffffff;">🔥 Stake This Game</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            The surest predictions selected directly from the main board, mathematically combined to match 5x, 10x, and 20x odds.
+            Predictions locked before kickoff. Will never rewrite history or change picks after matches start.
         </p>
     </div>
     """)
@@ -823,7 +863,7 @@ with tab_stake_this:
                     <h3 style="margin: 0; font-size: 1.25rem; color: #ffffff;">{slip_label}</h3>
                 </div>
                 <div style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-top: 4px;">
-                    {len(stake_slip)} main-board selections &nbsp;•&nbsp; Avg {avg_stake_conf}% confidence &nbsp;•&nbsp; <span style="color: #00e676;">Anti-1-Cut Protected</span>
+                    {len(stake_slip)} selections &nbsp;•&nbsp; Avg {avg_stake_conf}% confidence &nbsp;•&nbsp; <span style="color: #00e676;">Locked Pre-Match</span>
                 </div>
             </div>
             <div style="font-size: 2rem; font-weight: 800; color: #00e676; letter-spacing: -0.02em;">
@@ -831,7 +871,6 @@ with tab_stake_this:
             </div>
         </div>
 
-        <!-- SportyBet Multi-Code Bar -->
         <div class="sportybet-code-container">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 0.78rem; font-weight: 800; color: rgba(255,255,255,0.45); text-transform: uppercase;">CODE:</span>
@@ -856,7 +895,7 @@ with tab_stake_this:
                 "match": s["match"], "league": s["league"], "home": s["home"], "home_logo": s["home_logo"],
                 "away": s["away"], "away_logo": s["away_logo"], "time": s["time"], "clock": s["clock"],
                 "is_live": s["is_live"], "is_finished": s["is_finished"], "home_score": s["home_score"],
-                "away_score": s["away_score"], "is_boom": s["is_boom"],
+                "away_score": s["away_score"], "settlement": s["settlement"],
                 "recommendation": {"market": s["market"], "category": s["category"], "confidence": s["confidence"], "odds": s["odds"], "badge": "pill-green"},
                 "simulation": s["simulation"]
             }
@@ -889,7 +928,7 @@ with tab_sure89:
     <div style="margin-bottom: 16px;">
         <h2 style="margin: 0 0 4px 0; font-size: 1.5rem;">💎 High-Certainty Vault: 89% & Above</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with anti-one-cut market protection.
+            Exclusively isolates games meeting the strict ≥ 89.0% probability threshold with immutable lock protection.
         </p>
     </div>
     """)
@@ -899,7 +938,7 @@ with tab_sure89:
         st.info("No fixtures currently meet the ≥ 89.0% threshold today.")
 
 # =====================================================================
-# TAB 4: BOOMED TODAY (DEDICATED SHOWCASE)
+# TAB 4: BOOMED TODAY (HONEST VERIFIED WINS ONLY)
 # =====================================================================
 with tab_booms:
     render_html("""
@@ -907,17 +946,35 @@ with tab_booms:
         <span class="boom-badge">💥 Verified Results Tracker</span>
         <h2 style="margin: 6px 0 4px 0; font-size: 1.5rem;">Winning Hits & Boomed Matches</h2>
         <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
-            All predictions from today that have officially landed and won.
+            All pre-match locked predictions from today that officially won without changing picks.
         </p>
     </div>
     """)
     if boom_fixtures:
         render_quant_grid(boom_fixtures)
     else:
-        st.info("Active matches are currently in progress. As soon as goals land, winning fixtures will be showcased here!")
+        st.info("Matches are in progress. As soon as goals land on locked predictions, winning fixtures will show here.")
 
 # =====================================================================
-# TAB 5: SAFE BANKER HUB (EXACT MULTI-ODDS ACCUMULATORS)
+# TAB 5: CUTS / LOST MATCHES (HONEST AUDIT TRACKER)
+# =====================================================================
+with tab_cuts:
+    render_html("""
+    <div style="margin-bottom: 16px;">
+        <span class="cut-badge">❌ Honest Audit Log</span>
+        <h2 style="margin: 6px 0 4px 0; font-size: 1.5rem;">Cuts / Lost Matches</h2>
+        <p style="font-size: 0.88rem; color: rgba(255,255,255,0.6); margin: 0;">
+            Predictions that failed. The app will NEVER rewrite history or pretend these games won.
+        </p>
+    </div>
+    """)
+    if cut_fixtures:
+        render_quant_grid(cut_fixtures)
+    else:
+        st.info("No cuts recorded today yet.")
+
+# =====================================================================
+# TAB 6: SAFE BANKER HUB (EXACT MULTI-ODDS ACCUMULATORS)
 # =====================================================================
 with tab_surebets:
     render_html("""
@@ -926,7 +983,7 @@ with tab_surebets:
             🎯
         </div>
         <div>
-            <span class="glass-pill pill-green">Anti-1-Cut Banker Engine</span>
+            <span class="glass-pill pill-green">Locked Banker Engine</span>
             <h2 style="margin: 2px 0 0 0; font-size: 1.5rem; color: #ffffff !important;">Mathematical Banker Accumulator Hub</h2>
         </div>
     </div>
@@ -970,7 +1027,7 @@ with tab_surebets:
                     <h3 style="margin: 0; font-size: 1.25rem; color: #ffffff;">{slip_label}</h3>
                 </div>
                 <div style="font-size: 0.82rem; color: rgba(255,255,255,0.5); margin-top: 4px;">
-                    {len(selected_slip)} combined picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #00e676;">Anti-1-Cut Protected</span>
+                    {len(selected_slip)} combined picks &nbsp;•&nbsp; Avg {avg_conf}% confidence &nbsp;•&nbsp; <span style="color: #00e676;">Locked Pre-Match</span>
                 </div>
             </div>
             <div style="font-size: 1.7rem; font-weight: 800; color: #00e676; letter-spacing: -0.02em;">
@@ -1002,7 +1059,7 @@ with tab_surebets:
                 "match": s["match"], "league": s["league"], "home": s["home"], "home_logo": s["home_logo"],
                 "away": s["away"], "away_logo": s["away_logo"], "time": s["time"], "clock": s["clock"],
                 "is_live": s["is_live"], "is_finished": s["is_finished"], "home_score": s["home_score"],
-                "away_score": s["away_score"], "is_boom": s["is_boom"],
+                "away_score": s["away_score"], "settlement": s["settlement"],
                 "recommendation": {"market": s["market"], "category": s["category"], "confidence": s["confidence"], "odds": s["odds"], "badge": "pill-green"},
                 "simulation": s["simulation"]
             }
@@ -1018,7 +1075,7 @@ with tab_surebets:
             st.rerun()
 
 # =====================================================================
-# TAB 6: FRACTIONAL KELLY STAKING CALCULATOR
+# TAB 7: FRACTIONAL KELLY STAKING CALCULATOR
 # =====================================================================
 with tab_kelly:
     render_html("""
@@ -1048,7 +1105,7 @@ with tab_kelly:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_k2:
-        recommended_stake, calculated_edge = AntiOneCutEngine.calculate_kelly(
+        recommended_stake, calculated_edge = LockedPredictionEngine.calculate_kelly(
             user_bankroll, model_prob_in, bookie_odds, kelly_fraction
         )
         stake_pct = round((recommended_stake / user_bankroll) * 100, 2)
@@ -1077,7 +1134,7 @@ ${recommended_stake} <span style="font-size: 1rem; color: rgba(255,255,255,0.45)
 """)
 
 # =====================================================================
-# TAB 7: 7X7 POISSON SIMULATION MATRIX
+# TAB 8: 7X7 POISSON SIMULATION MATRIX
 # =====================================================================
 with tab_analyzer:
     render_html("""
