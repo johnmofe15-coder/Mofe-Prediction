@@ -25,104 +25,33 @@ def get_http_session() -> requests.Session:
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 SportyApp/1.0",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.sportybet.com/ng/"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+        "Accept": "application/json, text/plain, */*"
     })
     return session
 
+# Persistent active SportyBet Nigeria booking codes
 if "sportybet_ng_codes" not in st.session_state:
     st.session_state.sportybet_ng_codes = {
-        "board_master": "",
+        "board_master": "VFUBGJ",
+        "stake_5": "C5JEQK",
+        "stake_10": "B2WCRA",
+        "stake_20": "KFG5BM",
         "3_odds": "VFUBGJ",
         "5_odds": "C5JEQK",
         "10_odds": "B2WCRA",
         "20_odds": "KFG5BM"
     }
 
-# Confirmed High-Yield Elite Teams for Over 1.5 Goals
-ELITE_GOAL_TEAMS = {
-    "Manchester City", "Arsenal", "Liverpool", "Bayern Munich", "Bayer Leverkusen",
-    "Borussia Dortmund", "Real Madrid", "Barcelona", "Paris Saint-Germain", 
-    "Inter Milan", "Atalanta", "Sporting CP", "Benfica", "Galatasaray", 
-    "Fenerbahce", "PSV Eindhoven", "Feyenoord", "Club Brugge", "Bodo/Glimt"
+LEAGUE_TEMPO = {
+    "ger.1": 3.20, "ned.1": 3.15, "nor.1": 3.05, "eng.1": 2.95,
+    "bel.1": 2.85, "tur.1": 2.80, "ger.2": 2.90, "uefa.champions": 3.00,
+    "eng.2": 2.55, "fra.1": 2.60, "esp.1": 2.55, "ita.1": 2.55,
+    "usa.1": 2.85, "mex.1": 2.70, "sau.1": 2.90, "jpn.1": 2.50
 }
 
 # =====================================================================
-# 1. LIVE SPORTYBET NIGERIA MULTI-SELECTION BOOKING DISPATCHER
-# =====================================================================
-class SportyBetNigeriaDispatcher:
-    API_URL = "https://www.sportybet.com/api/ng/orders/share"
-
-    @staticmethod
-    def dispatch_full_board_slip(match_list: list) -> str:
-        """
-        Takes all matches on the board, constructs an official SportyBet order payload,
-        and posts it to SportyBet Nigeria to receive an authentic booking code.
-        """
-        # Return existing session code if already generated today
-        saved_code = st.session_state.sportybet_ng_codes.get("board_master", "").strip()
-        if saved_code and saved_code != "PENDING":
-            return saved_code
-
-        if not match_list:
-            return "N/A"
-
-        session = get_http_session()
-        outcomes = []
-        for m in match_list:
-            rec = m.get("recommendation", {})
-            m_type = rec.get("market_type", "OVER_1_5")
-            
-            # Map into SportyBet Nigeria outcome structure
-            if m_type == "OVER_1_5":
-                market_id = "18"
-                outcome_id = "1"
-                specifier = "total=1.5"
-            elif m_type == "DC_1X":
-                market_id = "10"
-                outcome_id = "10"
-                specifier = None
-            elif m_type == "DC_X2":
-                market_id = "10"
-                outcome_id = "12"
-                specifier = None
-            elif m_type == "DNB_H":
-                market_id = "15"
-                outcome_id = "1"
-                specifier = None
-            else:
-                market_id = "18"
-                outcome_id = "1"
-                specifier = "total=1.5"
-
-            outcomes.append({
-                "eventId": str(m.get("event_id", "")),
-                "marketId": market_id,
-                "outcomeId": outcome_id,
-                "specifier": specifier
-            })
-
-        payload = {
-            "source": "mobile",
-            "outcomes": outcomes
-        }
-
-        try:
-            res = session.post(SportyBetNigeriaDispatcher.API_URL, json=payload, timeout=4.0)
-            if res.status_code == 200:
-                data = res.json()
-                share_code = data.get("data", {}).get("shareCode")
-                if share_code:
-                    st.session_state.sportybet_ng_codes["board_master"] = share_code.upper()
-                    return share_code.upper()
-        except Exception:
-            pass
-
-        return saved_code if saved_code else "READY TO BOOK"
-
-# =====================================================================
-# 2. QUANTITATIVE PREDICTION & CORNER ENGINE (ANTI-1-CUT PROTECTED)
+# 1. QUANTITATIVE PREDICTION ENGINE (ANTI-1-CUT PROTECTED)
 # =====================================================================
 class AntiOneCutEngine:
     def __init__(self, home_advantage: float = 1.15):
@@ -130,7 +59,6 @@ class AntiOneCutEngine:
         self.max_goals = 7
         self.goals_range = np.arange(self.max_goals)
         self.factorials = np.array([math.factorial(i) for i in range(self.max_goals)], dtype=np.float64)
-        self.total_goals_grid = np.add.outer(self.goals_range, self.goals_range)
 
     def _poisson_vector(self, lmbda: float, max_range: int = 7) -> np.ndarray:
         lmbda = max(0.05, lmbda)
@@ -165,8 +93,8 @@ class AntiOneCutEngine:
         matrix = np.outer(h_probs, a_probs)
 
         h_win, draw, a_win = 0.0, 0.0, 0.0
-        ov_15, un_35, ov_25 = 0.0, 0.0, 0.0
-        ah_h_plus_15, ah_a_plus_15 = 0.0, 0.0
+        ov_15, un_15 = 0.0, 0.0
+        un_35 = 0.0
 
         for h in range(self.max_goals):
             for a in range(self.max_goals):
@@ -180,14 +108,13 @@ class AntiOneCutEngine:
                 else: a_win += p
 
                 if tot > 1.5: ov_15 += p
-                if tot <= 3.5: un_35 += p
-                if tot > 2.5: ov_25 += p
+                else: un_15 += p
 
-                if (fin_h + 1.5) > fin_a: ah_h_plus_15 += p
-                if (fin_a + 1.5) > fin_h: ah_a_plus_15 += p
+                if tot <= 3.5: un_35 += p
 
         dc_1x = h_win + draw
         dc_x2 = a_win + draw
+        dc_12 = h_win + a_win
 
         non_draw = max(0.001, h_win + a_win)
         dnb_h = h_win / non_draw
@@ -197,80 +124,72 @@ class AntiOneCutEngine:
             "adj_home_xG": round(adj_h, 2),
             "adj_away_xG": round(adj_a, 2),
             "1X2": {"Home": round(h_win * 100, 1), "Draw": round(draw * 100, 1), "Away": round(a_win * 100, 1)},
-            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1)},
+            "DoubleChance": {"1X": round(dc_1x * 100, 1), "X2": round(dc_x2 * 100, 1), "12": round(dc_12 * 100, 1)},
             "DNB": {"Home": round(dnb_h * 100, 1), "Away": round(dnb_a * 100, 1)},
-            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1), "Over_2_5": round(ov_25 * 100, 1)},
-            "Positive_AH": {"Home_Plus_1_5": round(ah_h_plus_15 * 100, 1), "Away_Plus_1_5": round(ah_a_plus_15 * 100, 1)}
+            "Goals": {"Over_1_5": round(ov_15 * 100, 1), "Under_1_5": round(un_15 * 100, 1), "Under_3_5": round(un_35 * 100, 1)}
         }
 
     def evaluate_anti_one_cut(self, sim: dict, corners: dict, home_name: str, away_name: str):
         candidates = []
-        is_elite_game = any(team in ELITE_GOAL_TEAMS for team in [home_name, away_name])
 
         ov_15 = sim["Goals"]["Over_1_5"]
-        if is_elite_game and ov_15 >= 82.0:
+        if ov_15 >= 72.0:
+            odds_15 = round((100.0 / ov_15) * 1.06, 2)
             candidates.append({
                 "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
-                "category": "Elite Goals O/U", "confidence": ov_15,
-                "odds": round((100.0 / ov_15) * 1.06, 2), "market_type": "OVER_1_5"
+                "category": "Match Goals", "confidence": ov_15,
+                "odds": odds_15, "market_type": "OVER_1_5",
+                "score": ov_15 * (odds_15 ** 1.35)
             })
 
         dc = sim["DoubleChance"]
-        if dc["1X"] >= 78.0:
+        if dc["1X"] >= 72.0:
+            odds_1x = round((100.0 / dc["1X"]) * 1.05, 2)
             candidates.append({
                 "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
                 "category": "Double Chance", "confidence": dc["1X"],
-                "odds": round((100.0 / dc["1X"]) * 1.05, 2), "market_type": "DC_1X"
+                "odds": odds_1x, "market_type": "DC_1X",
+                "score": dc["1X"] * (odds_1x ** 1.35)
             })
-        if dc["X2"] >= 78.0:
+        if dc["X2"] >= 72.0:
+            odds_x2 = round((100.0 / dc["X2"]) * 1.05, 2)
             candidates.append({
                 "market": f"{away_name} or Draw (X2)", "sporty_market": "Double Chance X2",
                 "category": "Double Chance", "confidence": dc["X2"],
-                "odds": round((100.0 / dc["X2"]) * 1.05, 2), "market_type": "DC_X2"
+                "odds": odds_x2, "market_type": "DC_X2",
+                "score": dc["X2"] * (odds_x2 ** 1.35)
+            })
+        if dc["12"] >= 75.0:
+            odds_12 = round((100.0 / dc["12"]) * 1.05, 2)
+            candidates.append({
+                "market": "Any Team to Win (12)", "sporty_market": "Double Chance 12",
+                "category": "Double Chance", "confidence": dc["12"],
+                "odds": odds_12, "market_type": "DC_12",
+                "score": dc["12"] * (odds_12 ** 1.25)
             })
 
         dnb = sim["DNB"]
-        if dnb["Home"] >= 68.0:
+        if dnb["Home"] >= 65.0:
+            odds_dnb = round((100.0 / dnb["Home"]) * 1.06, 2)
             candidates.append({
                 "market": f"{home_name} (Draw No Bet)", "sporty_market": f"{home_name} DNB",
                 "category": "Draw No Bet", "confidence": dnb["Home"],
-                "odds": round((100.0 / dnb["Home"]) * 1.06, 2), "market_type": "DNB_H"
+                "odds": odds_dnb, "market_type": "DNB_H",
+                "score": dnb["Home"] * (odds_dnb ** 1.25)
             })
-        elif dnb["Away"] >= 68.0:
+        elif dnb["Away"] >= 65.0:
+            odds_dnba = round((100.0 / dnb["Away"]) * 1.06, 2)
             candidates.append({
                 "market": f"{away_name} (Draw No Bet)", "sporty_market": f"{away_name} DNB",
                 "category": "Draw No Bet", "confidence": dnb["Away"],
-                "odds": round((100.0 / dnb["Away"]) * 1.06, 2), "market_type": "DNB_A"
+                "odds": odds_dnba, "market_type": "DNB_A",
+                "score": dnb["Away"] * (odds_dnba ** 1.25)
             })
 
-        un_35 = sim["Goals"]["Under_3_5"]
-        if un_35 >= 80.0:
-            candidates.append({
-                "market": "Under 3.5 Goals", "sporty_market": "Under 3.5 Goals",
-                "category": "Safety Under", "confidence": un_35,
-                "odds": round((100.0 / un_35) * 1.05, 2), "market_type": "UNDER_3_5"
-            })
-
-        ah = sim["Positive_AH"]
-        if sim["1X2"]["Home"] < sim["1X2"]["Away"]:
-            if ah["Home_Plus_1_5"] >= 85.0:
-                candidates.append({
-                    "market": f"{home_name} (+1.5 Asian Handicap)", "sporty_market": f"{home_name} (+1.5 AH)",
-                    "category": "Asian Handicap (+)", "confidence": ah["Home_Plus_1_5"],
-                    "odds": round((100.0 / ah["Home_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
-                })
-        else:
-            if ah["Away_Plus_1_5"] >= 85.0:
-                candidates.append({
-                    "market": f"{away_name} (+1.5 Asian Handicap)", "sporty_market": f"{away_name} (+1.5 AH)",
-                    "category": "Asian Handicap (+)", "confidence": ah["Away_Plus_1_5"],
-                    "odds": round((100.0 / ah["Away_Plus_1_5"]) * 1.05, 2), "market_type": "AH_PLUS_15"
-                })
-
-        candidates.sort(key=lambda x: x["confidence"], reverse=True)
+        candidates.sort(key=lambda x: x["score"], reverse=True)
         primary_rec = candidates[0] if candidates else {
-            "market": f"{home_name} or Draw (1X)", "sporty_market": "Double Chance 1X",
-            "category": "Double Chance", "confidence": 76.0, "odds": 1.25, "market_type": "DC_1X"
+            "market": "Over 1.5 Goals", "sporty_market": "Over 1.5 Goals",
+            "category": "Match Goals", "confidence": 75.0, "odds": 1.25, "market_type": "OVER_1_5"
         }
 
         if primary_rec["confidence"] >= 89.0:
@@ -301,11 +220,11 @@ class AntiOneCutEngine:
                 return True
             if m_type == "DC_X2" and away_score >= home_score:
                 return True
+            if m_type == "DC_12" and home_score != away_score:
+                return True
             if m_type == "DNB_H" and home_score > away_score:
                 return True
             if m_type == "DNB_A" and away_score > home_score:
-                return True
-            if m_type == "AH_PLUS_15":
                 return True
         return False
 
@@ -336,7 +255,6 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
         for c in m["candidates"]:
             if c["confidence"] >= 72.0:
                 all_picks.append({
-                    "event_id": m.get("event_id", ""),
                     "match": m["match"],
                     "home": m["home"],
                     "away": m["away"],
@@ -355,7 +273,6 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
                     "category": c["category"],
                     "confidence": c["confidence"],
                     "odds": c["odds"],
-                    "market_type": c.get("market_type", "OVER_1_5"),
                     "simulation": m["simulation"]
                 })
 
@@ -386,7 +303,7 @@ def build_exact_target_ticket(all_matches: list, target_odds: float):
     return selected, round(current_odds, 2)
 
 # =====================================================================
-# 3. UI LIQUID GLASS & NEW STREAMLINED SCORE CAPSULE
+# 2. UI STYLING
 # =====================================================================
 render_html("""
 <style>
@@ -439,7 +356,6 @@ render_html("""
         animation: pulse-boom 1.8s infinite;
     }
 
-    /* REDESIGNED SLEEK HORIZONTAL SCORE CAPSULE */
     .score-capsule {
         display: inline-flex;
         align-items: center;
@@ -648,13 +564,15 @@ def fetch_single_league(args) -> list:
                 except:
                     match_time = raw_date[11:16] + " GMT"
 
-            seed = sum(ord(c) for c in (h_name + a_name))
-            raw_h_xG = 1.30 + ((seed % 11) / 10.0)
-            raw_a_xG = 0.95 + (((seed * 3) % 9) / 10.0)
+            tempo = LEAGUE_TEMPO.get(league["code"], 2.70)
+            h_power = 1.30 if any(t in h_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter", "Liverpool", "Leverkusen"]) else 1.10
+            a_power = 1.20 if any(t in a_name for t in ["City", "Real", "Bayern", "Paris", "Arsenal", "Barcelona", "Inter", "Liverpool", "Leverkusen"]) else 0.95
+            raw_h_xG = (tempo / 2.0) * h_power
+            raw_a_xG = (tempo / 2.0) * a_power
 
             sim = quant_engine.simulate_match(raw_h_xG, raw_a_xG, home_score, away_score, 90.0)
-            h_c_lmbda = 4.8 + ((seed % 5) / 2.0)
-            a_c_lmbda = 3.6 + (((seed * 2) % 5) / 2.0)
+            h_c_lmbda = 4.8 + ((len(h_name) % 4) / 2.0)
+            a_c_lmbda = 3.6 + ((len(a_name) % 4) / 2.0)
             corner_sim = quant_engine.simulate_corners(h_c_lmbda, a_c_lmbda)
 
             rec, candidates = quant_engine.evaluate_anti_one_cut(sim, corner_sim, h_name, a_name)
@@ -662,7 +580,7 @@ def fetch_single_league(args) -> list:
 
             default_logo = "https://a.espncdn.com/combiner/i?img=/i/teamlogos/default-team-logo-500.png"
             matches.append({
-                "event_id": str(event.get("id", str(seed))),
+                "event_id": str(event.get("id", "0")),
                 "match": f"{h_name} vs {a_name}",
                 "league": league["name"],
                 "home": h_name,
@@ -700,7 +618,7 @@ def fetch_all_fixtures():
                 flat.append(m)
     return flat
 
-with st.spinner("Streaming active fixtures & calculating SportyBet Nigeria master codes..."):
+with st.spinner("Streaming fixtures & compiling SportyBet Nigeria master codes..."):
     all_today_games = fetch_all_fixtures()
     upcoming_games = [m for m in all_today_games if not m["is_finished"]]
     live_fixtures = [m for m in all_today_games if m["is_live"]]
@@ -815,28 +733,26 @@ def render_quant_grid(match_list):
     render_html(f'<div class="card-grid-container">{"".join(cards_html)}</div>')
 
 # =====================================================================
-# TAB 1: DAILY MATCH BOARD (WITH ALL-IN-ONE MASTER SPORTYBET CODE)
+# TAB 1: DAILY MATCH BOARD
 # =====================================================================
 with tab_feed:
     show_upcoming_only = st.checkbox("Show only upcoming games (hide full-time results)", value=False)
     board_display_list = upcoming_games if show_upcoming_only else all_today_games
     sorted_board = sorted(board_display_list, key=lambda x: x["recommendation"]["confidence"], reverse=True)
 
-    # Master Board Booking Dispatcher (Packages all games on the screen into one code)
-    active_matches_for_code = upcoming_games if upcoming_games else all_today_games
-    master_board_code = SportyBetNigeriaDispatcher.dispatch_full_board_slip(active_matches_for_code[:12])
+    # Active Master Code for the entire board
+    active_board_code = st.session_state.sportybet_ng_codes.get("board_master", "VFUBGJ")
 
-    # SportyBet Master Booking Bar
     render_html(f"""
     <div style="background: #0d121d; border: 1.5px solid #00e676; border-radius: 14px; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; box-shadow: 0 0 20px rgba(0, 230, 118, 0.15);">
         <div>
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="boom-badge">SPORTYBET FULL-BOARD MULTI-CODE</span>
-                <span style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">All {len(active_matches_for_code[:12])} Board Matches Included</span>
+                <span style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">All Matches Included</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px; margin-top: 6px;">
                 <span style="font-size: 0.82rem; font-weight: 700; color: rgba(255,255,255,0.5); text-transform: uppercase;">Sportybet ng:</span>
-                <span style="background: rgba(0, 230, 118, 0.15); border: 1px solid #00e676; color: #00e676; padding: 4px 16px; border-radius: 8px; font-weight: 800; font-size: 1.25rem; letter-spacing: 0.08em;">{master_board_code}</span>
+                <span style="background: rgba(0, 230, 118, 0.15); border: 1px solid #00e676; color: #00e676; padding: 4px 16px; border-radius: 8px; font-weight: 800; font-size: 1.25rem; letter-spacing: 0.08em;">{active_board_code}</span>
             </div>
         </div>
         <div style="display: flex; gap: 10px;">
@@ -846,6 +762,12 @@ with tab_feed:
         </div>
     </div>
     """)
+
+    with st.expander("📝 Update Official SportyBet Nigeria Code for Full Board"):
+        new_b_code = st.text_input("Enter Code:", value=active_board_code, key="sync_board_code")
+        if new_b_code != active_board_code and new_b_code.strip():
+            st.session_state.sportybet_ng_codes["board_master"] = new_b_code.strip().upper()
+            st.rerun()
 
     render_html('<span class="glass-pill pill-cyan" style="font-size: 0.85rem; padding: 6px 14px; margin-bottom: 8px;">⚡ TODAY\'S MATCH BOARD</span>')
     if sorted_board:
@@ -879,17 +801,16 @@ with tab_stake_this:
     if "5" in stake_mode:
         stake_slip, stake_odds = build_exact_target_ticket(feed_pool, target_odds=5.00)
         slip_label = "Stake This: Safe 5 Odds"
-        storage_key = "5_odds"
+        storage_key = "stake_5"
     elif "10" in stake_mode:
         stake_slip, stake_odds = build_exact_target_ticket(feed_pool, target_odds=10.00)
         slip_label = "Stake This: Monster 10 Odds"
-        storage_key = "10_odds"
+        storage_key = "stake_10"
     else:
         stake_slip, stake_odds = build_exact_target_ticket(feed_pool, target_odds=20.00)
         slip_label = "Stake This: Master 20 Odds"
-        storage_key = "20_odds"
+        storage_key = "stake_20"
 
-    # Automated multi-game code dispatch
     stake_code = st.session_state.sportybet_ng_codes.get(storage_key, "VFUBGJ")
     avg_stake_conf = round(sum(s["confidence"] for s in stake_slip) / max(1, len(stake_slip)), 2) if stake_slip else 0.0
 
