@@ -12,6 +12,40 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+def fetch_live_sportybet_code(selected_slip_games):
+    """
+    Takes the matches chosen by your app and securely exchanges 
+    them for a live SportyBet code via BetRelay.
+    """
+    if not selected_slip_games:
+        return "NO_GAMES"
+        
+    url = "https://betrelay.com.ng" # Official BetRelay booking endpoint
+    headers = {
+        "Authorization": "br_test_HkGxkhqGb6vTTAhLFxX4RTKM9kaB3Ih5PpCcUn9N",
+        "Content-Type": "application/json"
+    }
+    
+    # Restructure your app's match selections into the format BetRelay requires
+    payload = {
+        "bookmaker": "sportybet",
+        "country": "Nigeria",
+        "selections": [
+            {
+                "home_team": game["home"],
+                "away_team": game["away"],
+                "market": game["sporty_market"]
+            } for game in selected_slip_games
+        ]
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("booking_code", "ERROR")
+    except Exception:
+        pass
+    return "REFRESHING"
 
 # Strips whitespace indentation so Streamlit does not render HTML as code blocks
 def render_html(html_str: str):
